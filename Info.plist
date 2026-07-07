@@ -22,6 +22,8 @@
     <true/>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Blooming8 Widget connects to your Blooming8 photo frame over your local Wi-Fi network to show the current photo and display new ones.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Blooming8 Widget uses Bluetooth to send a wake pulse to your photo frame when it's asleep, so it can reconnect over Wi-Fi.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>

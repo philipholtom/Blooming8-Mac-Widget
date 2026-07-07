@@ -7,6 +7,7 @@ struct ContentView: View {
 
     @State private var showSettings: Bool = false
     @State private var ipDraft: String = ""
+    @State private var bleNameDraft: String = ""
 
     var body: some View {
         VStack(spacing: 12) {
@@ -61,6 +62,7 @@ struct ContentView: View {
         .frame(width: 300)
         .task {
             ipDraft = settings.deviceIP
+            bleNameDraft = settings.bleDeviceName
             if !settings.deviceIP.isEmpty {
                 await controller.refreshCurrentPhoto()
                 await controller.loadGalleries()
@@ -77,7 +79,10 @@ struct ContentView: View {
             Spacer()
             Button {
                 showSettings.toggle()
-                if showSettings { ipDraft = settings.deviceIP }
+                if showSettings {
+                    ipDraft = settings.deviceIP
+                    bleNameDraft = settings.bleDeviceName
+                }
             } label: {
                 Image(systemName: "gearshape")
             }
@@ -92,11 +97,19 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             TextField("e.g. 192.168.1.42", text: $ipDraft)
                 .textFieldStyle(.roundedBorder)
+
+            Text("Bluetooth device name (for waking a sleeping frame)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("e.g. Office", text: $bleNameDraft)
+                .textFieldStyle(.roundedBorder)
+
             HStack {
                 Button("Cancel") { showSettings = false }
                 Spacer()
                 Button("Save & Connect") {
                     settings.deviceIP = ipDraft
+                    settings.bleDeviceName = bleNameDraft
                     showSettings = false
                     Task {
                         await controller.refreshCurrentPhoto()
@@ -123,6 +136,13 @@ struct ContentView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                         .frame(maxWidth: .infinity)
                 }
+
+                Button {
+                    Task { await controller.wakeFrame() }
+                } label: {
+                    Image(systemName: "bolt.fill")
+                }
+                .help("Send a Bluetooth wake pulse to the frame")
 
                 Button {
                     Task { await controller.showRandomPhoto() }

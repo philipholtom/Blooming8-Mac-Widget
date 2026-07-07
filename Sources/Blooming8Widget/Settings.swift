@@ -25,6 +25,9 @@ final class Settings: ObservableObject {
     @Published var randomWeighting: RandomWeighting {
         didSet { UserDefaults.standard.set(randomWeighting.rawValue, forKey: "randomWeighting") }
     }
+    @Published var bleDeviceName: String {
+        didSet { UserDefaults.standard.set(bleDeviceName, forKey: "bleDeviceName") }
+    }
 
     init() {
         deviceIP = UserDefaults.standard.string(forKey: "deviceIP") ?? ""
@@ -42,5 +45,8 @@ final class Settings: ObservableObject {
         } else {
             randomWeighting = .perPhoto
         }
+        // Defaults to "Office" — the BLE name your existing NASA APOD Frame
+        // script uses to wake this same frame (same IP, confirmed working).
+        bleDeviceName = UserDefaults.standard.string(forKey: "bleDeviceName") ?? "Office"
     }
 }
