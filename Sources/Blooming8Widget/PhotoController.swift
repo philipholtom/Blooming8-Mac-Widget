@@ -5,6 +5,7 @@ import Combine
 final class PhotoController: ObservableObject {
     let settings: Settings
     private let client = BloominClient()
+    private let bleWaker = BLEWaker()
 
     @Published var previewImage: NSImage?
     @Published var currentImagePath: String?
@@ -34,12 +35,67 @@ final class PhotoController: ObservableObject {
         }
     }
 
+    /// Sends a Bluetooth wake pulse on demand (e.g. from a button or menu item),
+    /// independent of any HTTP call failing first.
+    @discardableResult
+    func wakeFrame() async -> Bool {
+        guard !settings.bleDeviceName.isEmpty else {
+            statusText = "Set a Bluetooth device name in Settings first."
+            return false
+        }
+        isBusy = true
+        defer { isBusy = false }
+        statusText = "Sending Bluetooth wake pulse to '\(settings.bleDeviceName)'..."
+        let woke = await bleWaker.wake(deviceName: settings.bleDeviceName)
+        statusText = woke
+            ? "Wake pulse sent."
+            : "Couldn't find '\(settings.bleDeviceName)' over Bluetooth — is it powered on and nearby?"
+        return woke
+    }
+
+    /// Runs `operation`; if it fails with a connectivity error (the frame is
+    /// likely asleep) and a Bluetooth device name is configured, sends a wake
+    /// pulse, polls until the frame answers HTTP again, then retries once.
+    private func withWakeRetry<T>(_ operation: () async throws -> T) async throws -> T {
+        do {
+            return try await operation()
+        } catch {
+            guard isConnectivityError(error), !settings.bleDeviceName.isEmpty else { throw error }
+            statusText = "Frame unreachable — sending Bluetooth wake pulse..."
+            guard await bleWaker.wake(deviceName: settings.bleDeviceName) else { throw error }
+            statusText = "Wake pulse sent — waiting for frame to come online..."
+            guard await waitUntilReachable() else { throw error }
+            return try await operation()
+        }
+    }
+
+    private func waitUntilReachable(maxWait: TimeInterval = 45) async -> Bool {
+        let deadline = Date().addingTimeInterval(maxWait)
+        while Date() < deadline {
+            if (try? await client.fetchDeviceInfo(ip: settings.deviceIP)) != nil {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+        }
+        return false
+    }
+
+    private func isConnectivityError(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .cannotConnectToHost, .timedOut, .networkConnectionLost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet:
+            return true
+        default:
+            return false
+        }
+    }
+
     func refreshCurrentPhoto() async {
         guard !settings.deviceIP.isEmpty else { return }
         isBusy = true
         defer { isBusy = false }
         do {
-            let info = try await client.fetchDeviceInfo(ip: settings.deviceIP)
+            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
             deviceName = info.name
             currentGalleryOnDevice = info.gallery
             if let path = info.image, !path.isEmpty {
@@ -62,6 +118,10 @@ final class PhotoController: ObservableObject {
         isBusy = true
         defer { isBusy = false }
         do {
+            // Cheap reachability probe first: if the frame is asleep, this wakes
+            // it over Bluetooth and waits before the (heavier) gallery fetches below.
+            _ = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+
             let picked: (gallery: String, name: String)
             let statusMessage: String
 

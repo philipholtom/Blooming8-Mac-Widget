@@ -53,6 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: "Random Photo", action: #selector(randomPhotoFromMenu), keyEquivalent: "r")
             .target = self
+        menu.addItem(withTitle: "Wake Frame", action: #selector(wakeFrameFromMenu), keyEquivalent: "w")
+            .target = self
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Quit Blooming8 Widget", action: #selector(quitApp), keyEquivalent: "q")
             .target = self
@@ -66,6 +68,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func randomPhotoFromMenu() {
         Task { await controller.showRandomPhoto() }
+    }
+
+    @objc private func wakeFrameFromMenu() {
+        Task { await controller.wakeFrame() }
     }
 
     @objc private func quitApp() {

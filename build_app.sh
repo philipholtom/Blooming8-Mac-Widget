@@ -16,4 +16,11 @@ cp "$BIN_PATH" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
 
 echo "Built $APP_BUNDLE"
-echo "Move it to /Applications and double-click to launch, or run: open $APP_BUNDLE"
+
+INSTALLED="/Applications/$APP_NAME.app"
+pkill -x "$APP_NAME" 2>/dev/null || true
+sleep 1
+rm -rf "$INSTALLED"
+cp -R "$APP_BUNDLE" "$INSTALLED"
+echo "Installed to $INSTALLED"
+open "$INSTALLED"
