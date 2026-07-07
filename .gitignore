@@ -1,0 +1,5 @@
+.build/
+.swiftpm/
+Blooming8Widget.app/
+.DS_Store
+.claude/
