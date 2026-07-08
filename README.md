@@ -16,7 +16,7 @@ A macOS menu bar app for the [BLOOMIN8](https://bloomin8.com/) e-ink photo frame
 
 ## How it works
 
-The BLOOMIN8 frame exposes an undocumented local HTTP API on your Wi-Fi network (no cloud, no auth) — this app talks to it directly:
+The BLOOMIN8 frame exposes an  local HTTP API on your Wi-Fi network (no cloud, no auth) — this app talks to it directly:
 
 - `GET /deviceInfo` — current photo, active gallery, battery level, device name
 - `GET /gallery/list`, `GET /gallery` — list galleries and their images (with cursor-based pagination for galleries over 51 photos)
