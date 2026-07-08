@@ -28,6 +28,13 @@ final class Settings: ObservableObject {
     @Published var bleDeviceName: String {
         didSet { UserDefaults.standard.set(bleDeviceName, forKey: "bleDeviceName") }
     }
+    @Published var tabs: [GalleryTab] {
+        didSet {
+            if let data = try? JSONEncoder().encode(tabs) {
+                UserDefaults.standard.set(data, forKey: "galleryTabs")
+            }
+        }
+    }
 
     init() {
         deviceIP = UserDefaults.standard.string(forKey: "deviceIP") ?? ""
@@ -48,5 +55,12 @@ final class Settings: ObservableObject {
         // Defaults to "Office" — the BLE name your existing NASA APOD Frame
         // script uses to wake this same frame (same IP, confirmed working).
         bleDeviceName = UserDefaults.standard.string(forKey: "bleDeviceName") ?? "Office"
+
+        if let data = UserDefaults.standard.data(forKey: "galleryTabs"),
+           let decoded = try? JSONDecoder().decode([GalleryTab].self, from: data) {
+            tabs = decoded
+        } else {
+            tabs = []
+        }
     }
 }

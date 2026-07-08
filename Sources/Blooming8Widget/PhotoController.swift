@@ -10,13 +10,40 @@ final class PhotoController: ObservableObject {
     @Published var previewImage: NSImage?
     @Published var currentImagePath: String?
     @Published var deviceName: String?
+    @Published var batteryPercent: Int?
     @Published var currentGalleryOnDevice: String?
     @Published var galleries: [String] = []
     @Published var statusText: String = ""
     @Published var isBusy: Bool = false
+    /// Tabs unlocked this app session (in-memory only — re-locks on relaunch).
+    @Published var unlockedTabIDs: Set<UUID> = []
 
     init(settings: Settings) {
         self.settings = settings
+    }
+
+    /// Every gallery name that's currently selectable for randomization: ones
+    /// not assigned to any tab, plus ones in tabs that are unlocked (or have
+    /// no password). Galleries in a still-locked tab are excluded even if
+    /// they were checked before the tab got locked.
+    var availableGalleryNames: Set<String> {
+        let assigned = Set(settings.tabs.flatMap { $0.galleryNames })
+        var available = Set(galleries).subtracting(assigned)
+        for tab in settings.tabs where !tab.isLocked || unlockedTabIDs.contains(tab.id) {
+            available.formUnion(tab.galleryNames)
+        }
+        return available
+    }
+
+    @discardableResult
+    func unlock(tab: GalleryTab, password: String) -> Bool {
+        guard let hash = tab.passwordHash else {
+            unlockedTabIDs.insert(tab.id)
+            return true
+        }
+        guard PasswordHasher.hash(password) == hash else { return false }
+        unlockedTabIDs.insert(tab.id)
+        return true
     }
 
     func loadGalleries() async {
@@ -80,6 +107,12 @@ final class PhotoController: ObservableObject {
         return false
     }
 
+    private func applyDeviceInfo(_ info: DeviceInfo) {
+        deviceName = info.name
+        currentGalleryOnDevice = info.gallery
+        batteryPercent = info.battery
+    }
+
     private func isConnectivityError(_ error: Error) -> Bool {
         guard let urlError = error as? URLError else { return false }
         switch urlError.code {
@@ -96,8 +129,7 @@ final class PhotoController: ObservableObject {
         defer { isBusy = false }
         do {
             let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
-            deviceName = info.name
-            currentGalleryOnDevice = info.gallery
+            applyDeviceInfo(info)
             if let path = info.image, !path.isEmpty {
                 let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
                 previewImage = NSImage(data: data)
@@ -110,9 +142,9 @@ final class PhotoController: ObservableObject {
     }
 
     func showRandomPhoto() async {
-        let galleriesToUse = settings.selectedGalleries
+        let galleriesToUse = settings.selectedGalleries.intersection(availableGalleryNames)
         guard !galleriesToUse.isEmpty else {
-            statusText = "Select at least one gallery."
+            statusText = "Select at least one (unlocked) gallery."
             return
         }
         isBusy = true
@@ -120,7 +152,8 @@ final class PhotoController: ObservableObject {
         do {
             // Cheap reachability probe first: if the frame is asleep, this wakes
             // it over Bluetooth and waits before the (heavier) gallery fetches below.
-            _ = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+            applyDeviceInfo(info)
 
             let picked: (gallery: String, name: String)
             let statusMessage: String
