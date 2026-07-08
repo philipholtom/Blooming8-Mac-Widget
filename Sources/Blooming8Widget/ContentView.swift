@@ -9,6 +9,14 @@ struct ContentView: View {
     @State private var ipDraft: String = ""
     @State private var bleNameDraft: String = ""
 
+    @State private var activeTabID: UUID? = nil // nil = the implicit "All" tab
+    @State private var unlockPasswordDraft: String = ""
+    @State private var unlockError: Bool = false
+
+    @State private var showTabManager: Bool = false
+    @State private var newTabName: String = ""
+    @State private var passwordDrafts: [UUID: String] = [:]
+
     var body: some View {
         VStack(spacing: 12) {
             header
@@ -77,6 +85,9 @@ struct ContentView: View {
             Text("Blooming8")
                 .font(.headline)
             Spacer()
+            if let battery = controller.batteryPercent {
+                batteryIndicator(percent: battery)
+            }
             Button {
                 showSettings.toggle()
                 if showSettings {
@@ -88,6 +99,31 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    private func batteryIndicator(percent: Int) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: batterySymbolName(for: percent))
+            Text("\(percent)%")
+        }
+        .font(.caption)
+        .foregroundStyle(batteryColor(for: percent))
+    }
+
+    private func batterySymbolName(for percent: Int) -> String {
+        switch percent {
+        case ..<13: return "battery.0"
+        case ..<38: return "battery.25"
+        case ..<63: return "battery.50"
+        case ..<88: return "battery.75"
+        default: return "battery.100"
+        }
+    }
+
+    private func batteryColor(for percent: Int) -> Color {
+        if percent <= 15 { return .red }
+        if percent <= 30 { return .orange }
+        return .secondary
     }
 
     private var settingsForm: some View {
@@ -103,6 +139,16 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             TextField("e.g. Office", text: $bleNameDraft)
                 .textFieldStyle(.roundedBorder)
+
+            Divider()
+
+            if showTabManager {
+                tabManagerView
+            } else {
+                Button("Manage Tabs (\(settings.tabs.count))...") { showTabManager = true }
+            }
+
+            Divider()
 
             HStack {
                 Button("Cancel") { showSettings = false }
@@ -121,6 +167,102 @@ struct ContentView: View {
             }
         }
     }
+
+    // MARK: - Tab management (Settings)
+
+    private var tabManagerView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Tabs group galleries and can optionally require a password to view.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            ForEach(settings.tabs) { tab in
+                tabEditor(tab: tab)
+            }
+
+            HStack {
+                TextField("New tab name", text: $newTabName)
+                    .textFieldStyle(.roundedBorder)
+                Button("Add") {
+                    let trimmed = newTabName.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.isEmpty else { return }
+                    settings.tabs.append(GalleryTab(name: trimmed))
+                    newTabName = ""
+                }
+                .disabled(newTabName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            Button("Done") { showTabManager = false }
+        }
+    }
+
+    private func tabEditor(tab: GalleryTab) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(tab.name).bold()
+                Spacer()
+                Button(role: .destructive) {
+                    deleteTab(tab)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(controller.galleries, id: \.self) { name in
+                    Toggle(name, isOn: tabMembershipBinding(tab: tab, gallery: name))
+                        .toggleStyle(.checkbox)
+                        .font(.caption)
+                }
+            }
+
+            passwordEditor(tab: tab)
+            Divider()
+        }
+    }
+
+    private func passwordEditor(tab: GalleryTab) -> some View {
+        HStack {
+            SecureField(tab.isLocked ? "New password" : "Set password", text: passwordDraftBinding(for: tab))
+                .textFieldStyle(.roundedBorder)
+            Button(tab.isLocked ? "Update" : "Lock") { setPassword(for: tab) }
+                .disabled((passwordDrafts[tab.id] ?? "").isEmpty)
+            if tab.isLocked {
+                Button("Unlock") { removePassword(for: tab) }
+            }
+        }
+    }
+
+    private func passwordDraftBinding(for tab: GalleryTab) -> Binding<String> {
+        Binding(
+            get: { passwordDrafts[tab.id] ?? "" },
+            set: { passwordDrafts[tab.id] = $0 }
+        )
+    }
+
+    private func setPassword(for tab: GalleryTab) {
+        guard let index = settings.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        let password = passwordDrafts[tab.id] ?? ""
+        guard !password.isEmpty else { return }
+        settings.tabs[index].passwordHash = PasswordHasher.hash(password)
+        passwordDrafts[tab.id] = ""
+        controller.unlockedTabIDs.remove(tab.id) // re-lock immediately under the new password
+    }
+
+    private func removePassword(for tab: GalleryTab) {
+        guard let index = settings.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        settings.tabs[index].passwordHash = nil
+        controller.unlockedTabIDs.remove(tab.id)
+    }
+
+    private func deleteTab(_ tab: GalleryTab) {
+        settings.tabs.removeAll { $0.id == tab.id }
+        controller.unlockedTabIDs.remove(tab.id)
+        if activeTabID == tab.id { activeTabID = nil }
+    }
+
+    // MARK: - Main controls
 
     private var controls: some View {
         VStack(spacing: 8) {
@@ -151,7 +293,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(settings.selectedGalleries.isEmpty || controller.isBusy)
+                .disabled(settings.selectedGalleries.intersection(controller.availableGalleryNames).isEmpty || controller.isBusy)
             }
         }
         .disabled(controller.isBusy)
@@ -159,16 +301,108 @@ struct ContentView: View {
 
     private var galleryChecklist: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Galleries")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(controller.galleries, id: \.self) { name in
-                    Toggle(name, isOn: gallerySelectionBinding(for: name))
-                        .toggleStyle(.checkbox)
+            if !settings.tabs.isEmpty {
+                tabBar
+            }
+
+            if let tab = activeTab, tab.isLocked, !controller.unlockedTabIDs.contains(tab.id) {
+                lockedTabPrompt(tab: tab)
+            } else {
+                Text("Galleries")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(activeTabGalleryNames, id: \.self) { name in
+                        Toggle(name, isOn: gallerySelectionBinding(for: name))
+                            .toggleStyle(.checkbox)
+                    }
+                    if activeTabGalleryNames.isEmpty {
+                        Text("No galleries in this tab.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var tabBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                tabChip(name: "All", id: nil, isLocked: false)
+                ForEach(settings.tabs) { tab in
+                    tabChip(name: tab.name, id: tab.id, isLocked: tab.isLocked && !controller.unlockedTabIDs.contains(tab.id))
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func tabChip(name: String, id: UUID?, isLocked: Bool) -> some View {
+        Button {
+            activeTabID = id
+            unlockPasswordDraft = ""
+            unlockError = false
+        } label: {
+            HStack(spacing: 4) {
+                if isLocked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 9))
+                }
+                Text(name)
+            }
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(activeTabID == id ? Color.accentColor.opacity(0.25) : Color.gray.opacity(0.15))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func lockedTabPrompt(tab: GalleryTab) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("'\(tab.name)' is locked", systemImage: "lock.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            SecureField("Password", text: $unlockPasswordDraft)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { attemptUnlock(tab) }
+            if unlockError {
+                Text("Incorrect password.")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+            Button("Unlock") { attemptUnlock(tab) }
+                .buttonStyle(.borderedProminent)
+                .disabled(unlockPasswordDraft.isEmpty)
+        }
+    }
+
+    private func attemptUnlock(_ tab: GalleryTab) {
+        if controller.unlock(tab: tab, password: unlockPasswordDraft) {
+            unlockError = false
+            unlockPasswordDraft = ""
+        } else {
+            unlockError = true
+        }
+    }
+
+    private var activeTab: GalleryTab? {
+        guard let id = activeTabID else { return nil }
+        return settings.tabs.first(where: { $0.id == id })
+    }
+
+    private var ungroupedGalleryNames: [String] {
+        let assigned = Set(settings.tabs.flatMap { $0.galleryNames })
+        return controller.galleries.filter { !assigned.contains($0) }
+    }
+
+    private var activeTabGalleryNames: [String] {
+        if let tab = activeTab {
+            return controller.galleries.filter { tab.galleryNames.contains($0) }
+        } else {
+            return ungroupedGalleryNames
         }
     }
 
@@ -195,6 +429,22 @@ struct ContentView: View {
                     settings.selectedGalleries.insert(gallery)
                 } else {
                     settings.selectedGalleries.remove(gallery)
+                }
+            }
+        )
+    }
+
+    private func tabMembershipBinding(tab: GalleryTab, gallery: String) -> Binding<Bool> {
+        Binding(
+            get: {
+                settings.tabs.first(where: { $0.id == tab.id })?.galleryNames.contains(gallery) ?? false
+            },
+            set: { isOn in
+                guard let index = settings.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+                if isOn {
+                    settings.tabs[index].galleryNames.insert(gallery)
+                } else {
+                    settings.tabs[index].galleryNames.remove(gallery)
                 }
             }
         )
