@@ -17,9 +17,65 @@ final class PhotoController: ObservableObject {
     @Published var isBusy: Bool = false
     /// Tabs unlocked this app session (in-memory only — re-locks on relaunch).
     @Published var unlockedTabIDs: Set<UUID> = []
+    /// When the next automatic random photo is scheduled to fire, if enabled.
+    @Published var nextAutoRandomFireDate: Date?
+
+    private var autoRandomTimer: Timer?
+    private var autoRandomCancellable: AnyCancellable?
 
     init(settings: Settings) {
         self.settings = settings
+        // Re-evaluate the schedule whenever any relevant setting changes, and
+        // once immediately (Combine's sink fires with the current value right
+        // after subscribing) so the schedule is live from app launch.
+        autoRandomCancellable = Publishers.CombineLatest4(
+            settings.$autoRandomEnabled,
+            settings.$autoRandomInterval,
+            settings.$autoRandomDailyMinute,
+            settings.$deviceIP
+        )
+        .sink { [weak self] _, _, _, _ in
+            self?.updateAutoRandomSchedule()
+        }
+    }
+
+    /// (Re)starts or stops the auto-random timer to match current settings.
+    /// Safe to call any time settings change — always cancels any pending fire first.
+    private func updateAutoRandomSchedule() {
+        autoRandomTimer?.invalidate()
+        autoRandomTimer = nil
+        guard settings.autoRandomEnabled, !settings.deviceIP.isEmpty else {
+            nextAutoRandomFireDate = nil
+            return
+        }
+        scheduleNextAutoRandom()
+    }
+
+    private func scheduleNextAutoRandom() {
+        let interval: TimeInterval = settings.autoRandomInterval == .hourly
+            ? 3600
+            : secondsUntilNextDailyFire()
+        nextAutoRandomFireDate = Date().addingTimeInterval(interval)
+        autoRandomTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.showRandomPhoto()
+                self?.scheduleNextAutoRandom()
+            }
+        }
+    }
+
+    private func secondsUntilNextDailyFire() -> TimeInterval {
+        let calendar = Calendar.current
+        let now = Date()
+        var components = calendar.dateComponents([.year, .month, .day], from: now)
+        components.hour = settings.autoRandomDailyMinute / 60
+        components.minute = settings.autoRandomDailyMinute % 60
+        components.second = 0
+        var fireDate = calendar.date(from: components) ?? now
+        if fireDate <= now {
+            fireDate = calendar.date(byAdding: .day, value: 1, to: fireDate) ?? now.addingTimeInterval(86400)
+        }
+        return fireDate.timeIntervalSince(now)
     }
 
     /// Every gallery name that's currently selectable for randomization: ones

@@ -7,9 +7,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover?
     private let settings = Settings()
     private lazy var controller = PhotoController(settings: settings)
+    private var activityToken: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        // A menu bar app has no visible windows, so macOS App Nap would
+        // otherwise throttle its timers — this keeps the auto-random
+        // schedule firing on time while still allowing the system to sleep.
+        activityToken = ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep,
+            reason: "Scheduled random photo updates"
+        )
 
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {

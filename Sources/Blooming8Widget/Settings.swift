@@ -15,6 +15,20 @@ enum RandomWeighting: String, CaseIterable, Identifiable {
     }
 }
 
+enum AutoRandomInterval: String, CaseIterable, Identifiable {
+    case hourly
+    case daily
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .hourly: return "Every Hour"
+        case .daily: return "Daily"
+        }
+    }
+}
+
 final class Settings: ObservableObject {
     @Published var deviceIP: String {
         didSet { UserDefaults.standard.set(deviceIP, forKey: "deviceIP") }
@@ -34,6 +48,16 @@ final class Settings: ObservableObject {
                 UserDefaults.standard.set(data, forKey: "galleryTabs")
             }
         }
+    }
+    @Published var autoRandomEnabled: Bool {
+        didSet { UserDefaults.standard.set(autoRandomEnabled, forKey: "autoRandomEnabled") }
+    }
+    @Published var autoRandomInterval: AutoRandomInterval {
+        didSet { UserDefaults.standard.set(autoRandomInterval.rawValue, forKey: "autoRandomInterval") }
+    }
+    /// Minutes since midnight (local time), only used when autoRandomInterval == .daily.
+    @Published var autoRandomDailyMinute: Int {
+        didSet { UserDefaults.standard.set(autoRandomDailyMinute, forKey: "autoRandomDailyMinute") }
     }
 
     init() {
@@ -61,6 +85,19 @@ final class Settings: ObservableObject {
             tabs = decoded
         } else {
             tabs = []
+        }
+
+        autoRandomEnabled = UserDefaults.standard.bool(forKey: "autoRandomEnabled")
+        if let raw = UserDefaults.standard.string(forKey: "autoRandomInterval"),
+           let interval = AutoRandomInterval(rawValue: raw) {
+            autoRandomInterval = interval
+        } else {
+            autoRandomInterval = .hourly
+        }
+        if UserDefaults.standard.object(forKey: "autoRandomDailyMinute") != nil {
+            autoRandomDailyMinute = UserDefaults.standard.integer(forKey: "autoRandomDailyMinute")
+        } else {
+            autoRandomDailyMinute = 9 * 60 // 9:00 AM default
         }
     }
 }

@@ -53,6 +53,12 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if settings.autoRandomEnabled, let next = controller.nextAutoRandomFireDate {
+                Label("Next auto photo: \(next.formatted(date: .abbreviated, time: .shortened))", systemImage: "clock")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             if showSettings {
                 settingsForm
             } else {
@@ -150,6 +156,10 @@ struct ContentView: View {
 
             Divider()
 
+            autoRandomSection
+
+            Divider()
+
             HStack {
                 Button("Cancel") { showSettings = false }
                 Spacer()
@@ -166,6 +176,43 @@ struct ContentView: View {
                 .disabled(ipDraft.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
+    }
+
+    // MARK: - Automatic random photo (Settings)
+
+    private var autoRandomSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("Automatically show a random photo", isOn: $settings.autoRandomEnabled)
+
+            if settings.autoRandomEnabled {
+                Picker("Frequency", selection: $settings.autoRandomInterval) {
+                    ForEach(AutoRandomInterval.allCases) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+
+                if settings.autoRandomInterval == .daily {
+                    DatePicker("At", selection: autoRandomDailyTimeBinding, displayedComponents: .hourAndMinute)
+                }
+            }
+        }
+    }
+
+    private var autoRandomDailyTimeBinding: Binding<Date> {
+        Binding(
+            get: {
+                var components = DateComponents()
+                components.hour = settings.autoRandomDailyMinute / 60
+                components.minute = settings.autoRandomDailyMinute % 60
+                return Calendar.current.date(from: components) ?? Date()
+            },
+            set: { newDate in
+                let components = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                settings.autoRandomDailyMinute = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+            }
+        )
     }
 
     // MARK: - Tab management (Settings)
