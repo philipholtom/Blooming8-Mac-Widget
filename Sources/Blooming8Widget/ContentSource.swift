@@ -5,6 +5,11 @@ import Foundation
 protocol ContentSource {
     var id: String { get }
     var displayName: String { get }
+    /// The on-device gallery this source's images are uploaded into —
+    /// matches the galleries the original Python scripts already used
+    /// (e.g. "NASA" for APOD), so generated content lands alongside
+    /// whatever they already uploaded there rather than a new catch-all.
+    var galleryName: String { get }
     func generateImage(settings: Settings) async throws -> Data
 }
 

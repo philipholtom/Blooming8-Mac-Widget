@@ -6,6 +6,7 @@ import AppKit
 struct APODSource: ContentSource {
     let id = "apod"
     let displayName = "NASA Photo of the Day"
+    let galleryName = "NASA"
 
     private let width = 1200
     private let height = 1600

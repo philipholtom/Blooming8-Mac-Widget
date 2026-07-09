@@ -6,9 +6,6 @@ final class PhotoController: ObservableObject {
     let settings: Settings
     private let client = BloominClient()
     private let bleWaker = BLEWaker()
-    /// On-device gallery that generated content (APOD, Fortune, ...) gets
-    /// uploaded into, kept separate from the user's own photo galleries.
-    let generatedGalleryName = "Generated"
 
     @Published var previewImage: NSImage?
     @Published var currentImagePath: String?
@@ -264,8 +261,9 @@ final class PhotoController: ObservableObject {
     }
 
     /// Generates a fresh image from one of the checked content sources
-    /// (chosen at random if more than one is checked), uploads it to the
-    /// frame's "Generated" gallery, and displays it immediately.
+    /// (chosen at random if more than one is checked), uploads it to that
+    /// source's own gallery (matching whatever the original Python scripts
+    /// already used, e.g. "NASA" for APOD), and displays it immediately.
     func showRandomGeneratedContent() async {
         let sources = ContentSources.all.filter { settings.selectedContentSources.contains($0.id) }
         guard let source = sources.randomElement() else {
@@ -281,22 +279,22 @@ final class PhotoController: ObservableObject {
             statusText = "Generating \(source.displayName)..."
             let imageData = try await source.generateImage(settings: settings)
 
-            await client.ensureGallery(ip: settings.deviceIP, name: generatedGalleryName)
+            await client.ensureGallery(ip: settings.deviceIP, name: source.galleryName)
             let filename = "\(source.id)_\(Int(Date().timeIntervalSince1970)).jpg"
             let path = try await client.uploadImage(
                 ip: settings.deviceIP,
                 filename: filename,
-                gallery: generatedGalleryName,
+                gallery: source.galleryName,
                 imageData: imageData,
                 showNow: true
             )
 
             previewImage = NSImage(data: imageData)
             currentImagePath = path
-            currentGalleryOnDevice = generatedGalleryName
+            currentGalleryOnDevice = source.galleryName
             statusText = "Showed \(source.displayName)."
 
-            // Pick up the "Generated" gallery in the picker now that it exists.
+            // Pick up the source's gallery in the picker in case it's new.
             await loadGalleries()
         } catch {
             statusText = "Couldn't generate \(source.displayName): \(error.localizedDescription)"

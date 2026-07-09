@@ -423,7 +423,7 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Text("Generates a fresh image and uploads it to the frame's \"Generated\" gallery.")
+            Text("Generates a fresh image and uploads it to that source's own gallery on the frame (e.g. \"NASA\", \"Fortune\").")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

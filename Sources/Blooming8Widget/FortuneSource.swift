@@ -7,6 +7,7 @@ import AppKit
 struct FortuneSource: ContentSource {
     let id = "fortune"
     let displayName = "Fortune"
+    let galleryName = "Fortune"
 
     private let width = 1200
     private let height = 1600
