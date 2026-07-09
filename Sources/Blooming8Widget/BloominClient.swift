@@ -135,6 +135,50 @@ final class BloominClient {
         return data
     }
 
+    /// Best-effort: creates a gallery if it doesn't already exist. Ignores
+    /// failure (e.g. it already exists) since this is purely a convenience
+    /// to keep generated content out of the user's own galleries.
+    func ensureGallery(ip: String, name: String) async {
+        guard var components = try? URLComponents(string: baseURL(ip: ip) + "/gallery") else { return }
+        components.queryItems = [URLQueryItem(name: "name", value: name)]
+        guard let url = components.url else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        _ = try? await session.data(for: request)
+    }
+
+    private struct UploadResponse: Decodable {
+        let path: String
+    }
+
+    /// Uploads a JPEG to a gallery and, if `showNow`, displays it immediately.
+    /// Returns the stored path on the device (e.g. `/gallerys/{gallery}/{filename}`).
+    func uploadImage(ip: String, filename: String, gallery: String, imageData: Data, showNow: Bool) async throws -> String {
+        var components = URLComponents(string: try baseURL(ip: ip) + "/upload")!
+        components.queryItems = [
+            URLQueryItem(name: "filename", value: filename),
+            URLQueryItem(name: "gallery", value: gallery),
+            URLQueryItem(name: "show_now", value: showNow ? "1" : "0")
+        ]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"image\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (data, response) = try await session.data(for: request)
+        try checkStatus(response)
+        return try JSONDecoder().decode(UploadResponse.self, from: data).path
+    }
+
     private func checkStatus(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else {
             throw BloominError.badResponse("no HTTP response")

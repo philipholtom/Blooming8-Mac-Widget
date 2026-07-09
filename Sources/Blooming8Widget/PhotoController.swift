@@ -6,6 +6,9 @@ final class PhotoController: ObservableObject {
     let settings: Settings
     private let client = BloominClient()
     private let bleWaker = BLEWaker()
+    /// On-device gallery that generated content (APOD, Fortune, ...) gets
+    /// uploaded into, kept separate from the user's own photo galleries.
+    let generatedGalleryName = "Generated"
 
     @Published var previewImage: NSImage?
     @Published var currentImagePath: String?
@@ -257,6 +260,46 @@ final class PhotoController: ObservableObject {
             statusText = statusMessage
         } catch {
             statusText = "Couldn't show a random photo: \(error.localizedDescription)"
+        }
+    }
+
+    /// Generates a fresh image from one of the checked content sources
+    /// (chosen at random if more than one is checked), uploads it to the
+    /// frame's "Generated" gallery, and displays it immediately.
+    func showRandomGeneratedContent() async {
+        let sources = ContentSources.all.filter { settings.selectedContentSources.contains($0.id) }
+        guard let source = sources.randomElement() else {
+            statusText = "Select at least one content source."
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+            applyDeviceInfo(info)
+
+            statusText = "Generating \(source.displayName)..."
+            let imageData = try await source.generateImage(settings: settings)
+
+            await client.ensureGallery(ip: settings.deviceIP, name: generatedGalleryName)
+            let filename = "\(source.id)_\(Int(Date().timeIntervalSince1970)).jpg"
+            let path = try await client.uploadImage(
+                ip: settings.deviceIP,
+                filename: filename,
+                gallery: generatedGalleryName,
+                imageData: imageData,
+                showNow: true
+            )
+
+            previewImage = NSImage(data: imageData)
+            currentImagePath = path
+            currentGalleryOnDevice = generatedGalleryName
+            statusText = "Showed \(source.displayName)."
+
+            // Pick up the "Generated" gallery in the picker now that it exists.
+            await loadGalleries()
+        } catch {
+            statusText = "Couldn't generate \(source.displayName): \(error.localizedDescription)"
         }
     }
 }
