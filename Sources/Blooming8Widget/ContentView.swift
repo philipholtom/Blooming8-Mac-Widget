@@ -477,19 +477,22 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity)
                 }
 
-                Button {
-                    Task { await controller.showNextImage() }
+                Menu {
+                    Button("Redisplay Photo") {
+                        Task { await controller.redisplayCurrentPhoto() }
+                    }
+                    Button("Show Next") {
+                        Task { await controller.showNextImage() }
+                    }
+                    Button("Wake Frame") {
+                        Task { await controller.wakeFrame() }
+                    }
                 } label: {
-                    Image(systemName: "forward.fill")
+                    Image(systemName: "ellipsis.circle")
                 }
-                .help("Show the next image in the frame's current slideshow or playlist")
-
-                Button {
-                    Task { await controller.wakeFrame() }
-                } label: {
-                    Image(systemName: "bolt.fill")
-                }
-                .help("Send a Bluetooth wake pulse to the frame")
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("More: redisplay, show next, wake frame")
 
                 Button {
                     Task {

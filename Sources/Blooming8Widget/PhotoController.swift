@@ -272,6 +272,49 @@ final class PhotoController: ObservableObject {
         }
     }
 
+    /// Re-sends the currently displayed image to the frame. Useful when the
+    /// screen visibly didn't update after a previous action — the frame can
+    /// silently reject a /show call while it's still mid-draw from an
+    /// earlier one, so this retries a few times with a short pause if it
+    /// reports busy.
+    func redisplayCurrentPhoto() async {
+        guard !settings.deviceIP.isEmpty else { return }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+            applyDeviceInfo(info)
+            guard let path = info.image, !path.isEmpty else {
+                statusText = "No current photo to redisplay."
+                return
+            }
+
+            let maxAttempts = 4
+            var lastError: Error?
+            for attempt in 1...maxAttempts {
+                do {
+                    try await client.show(ip: settings.deviceIP, imagePath: path)
+                    lastError = nil
+                    break
+                } catch {
+                    lastError = error
+                    if attempt < maxAttempts {
+                        statusText = "Frame busy, retrying (\(attempt)/\(maxAttempts))..."
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    }
+                }
+            }
+            if let lastError { throw lastError }
+
+            let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
+            previewImage = NSImage(data: data)
+            currentImagePath = path
+            statusText = "Redisplayed the current photo."
+        } catch {
+            statusText = "Couldn't redisplay photo: \(error.localizedDescription)"
+        }
+    }
+
     /// Advances the frame's current playback queue by one (only meaningful
     /// when it's in gallery-slideshow or playlist mode), then refreshes the
     /// preview to whatever it landed on.

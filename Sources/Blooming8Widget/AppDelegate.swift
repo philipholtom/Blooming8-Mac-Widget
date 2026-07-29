@@ -62,6 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: "Random Photo", action: #selector(randomPhotoFromMenu), keyEquivalent: "r")
             .target = self
+        menu.addItem(withTitle: "Redisplay Photo", action: #selector(redisplayFromMenu), keyEquivalent: "")
+            .target = self
         menu.addItem(withTitle: "Show Next", action: #selector(showNextFromMenu), keyEquivalent: "n")
             .target = self
         menu.addItem(withTitle: "Wake Frame", action: #selector(wakeFrameFromMenu), keyEquivalent: "w")
@@ -79,6 +81,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func randomPhotoFromMenu() {
         Task { await controller.showRandomPhoto() }
+    }
+
+    @objc private func redisplayFromMenu() {
+        Task { await controller.redisplayCurrentPhoto() }
     }
 
     @objc private func showNextFromMenu() {
