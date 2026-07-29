@@ -13,6 +13,9 @@ final class PhotoController: ObservableObject {
     @Published var batteryPercent: Int?
     @Published var currentGalleryOnDevice: String?
     @Published var galleries: [String] = []
+    @Published var sleepDurationSeconds: Int?
+    @Published var maxIdleSeconds: Int?
+    @Published var wakeSensitivity: Int?
     @Published var statusText: String = ""
     @Published var isBusy: Bool = false
     /// Tabs unlocked this app session (in-memory only — re-locks on relaunch).
@@ -167,6 +170,9 @@ final class PhotoController: ObservableObject {
         deviceName = info.name
         currentGalleryOnDevice = info.gallery
         batteryPercent = info.battery
+        sleepDurationSeconds = info.sleepDuration
+        maxIdleSeconds = info.maxIdle
+        wakeSensitivity = info.idxWakeSens
     }
 
     private func isConnectivityError(_ error: Error) -> Bool {
@@ -176,6 +182,83 @@ final class PhotoController: ObservableObject {
             return true
         default:
             return false
+        }
+    }
+
+    /// Advances the frame's current playback queue by one (only meaningful
+    /// when it's in gallery-slideshow or playlist mode), then refreshes the
+    /// preview to whatever it landed on.
+    func showNextImage() async {
+        guard !settings.deviceIP.isEmpty else { return }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await withWakeRetry { try await client.showNext(ip: settings.deviceIP) }
+            let info = try await client.fetchDeviceInfo(ip: settings.deviceIP)
+            applyDeviceInfo(info)
+            if let path = info.image, !path.isEmpty {
+                let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
+                previewImage = NSImage(data: data)
+                currentImagePath = path
+            }
+            statusText = "Showed next image."
+        } catch {
+            statusText = "Couldn't show next image: \(error.localizedDescription)"
+        }
+    }
+
+    /// Starts a gallery slideshow that cycles on-device every `durationSeconds`.
+    func startSlideshow(gallery: String, durationSeconds: Int) async {
+        guard !gallery.isEmpty else {
+            statusText = "Choose a gallery for the slideshow."
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await withWakeRetry {
+                try await client.startSlideshow(ip: settings.deviceIP, gallery: gallery, durationSeconds: durationSeconds)
+            }
+            currentGalleryOnDevice = gallery
+            statusText = "Started slideshow of '\(gallery)' every \(durationSeconds)s."
+        } catch {
+            statusText = "Couldn't start slideshow: \(error.localizedDescription)"
+        }
+    }
+
+    /// Stops slideshow/playlist playback, returning the frame to single-image mode.
+    func stopSlideshow() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await withWakeRetry { try await client.stopPlayback(ip: settings.deviceIP) }
+            statusText = "Stopped slideshow."
+        } catch {
+            statusText = "Couldn't stop slideshow: \(error.localizedDescription)"
+        }
+    }
+
+    /// Pushes device-level settings (name, sleep timers, wake sensitivity) to
+    /// the frame. Only non-nil values are sent. Refreshes deviceInfo
+    /// afterward so the UI reflects what the frame actually accepted.
+    func updateDeviceSettings(name: String?, sleepDurationSeconds: Int?, maxIdleSeconds: Int?, wakeSensitivity: Int?) async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await withWakeRetry {
+                try await client.updateSettings(
+                    ip: settings.deviceIP,
+                    name: name,
+                    sleepDuration: sleepDurationSeconds,
+                    maxIdle: maxIdleSeconds,
+                    idxWakeSens: wakeSensitivity
+                )
+            }
+            let info = try await client.fetchDeviceInfo(ip: settings.deviceIP)
+            applyDeviceInfo(info)
+            statusText = "Device settings updated."
+        } catch {
+            statusText = "Couldn't update device settings: \(error.localizedDescription)"
         }
     }
 
@@ -257,6 +340,47 @@ final class PhotoController: ObservableObject {
             statusText = statusMessage
         } catch {
             statusText = "Couldn't show a random photo: \(error.localizedDescription)"
+        }
+    }
+
+    /// Generates a fresh image from one of the checked content sources
+    /// (chosen at random if more than one is checked), uploads it to that
+    /// source's own gallery (matching whatever the original Python scripts
+    /// already used, e.g. "NASA" for APOD), and displays it immediately.
+    func showRandomGeneratedContent() async {
+        let sources = ContentSources.all.filter { settings.selectedContentSources.contains($0.id) }
+        guard let source = sources.randomElement() else {
+            statusText = "Select at least one content source."
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+            applyDeviceInfo(info)
+
+            statusText = "Generating \(source.displayName)..."
+            let imageData = try await source.generateImage(settings: settings)
+
+            await client.ensureGallery(ip: settings.deviceIP, name: source.galleryName)
+            let filename = "\(source.id)_\(Int(Date().timeIntervalSince1970)).jpg"
+            let path = try await client.uploadImage(
+                ip: settings.deviceIP,
+                filename: filename,
+                gallery: source.galleryName,
+                imageData: imageData,
+                showNow: true
+            )
+
+            previewImage = NSImage(data: imageData)
+            currentImagePath = path
+            currentGalleryOnDevice = source.galleryName
+            statusText = "Showed \(source.displayName)."
+
+            // Pick up the source's gallery in the picker in case it's new.
+            await loadGalleries()
+        } catch {
+            statusText = "Couldn't generate \(source.displayName): \(error.localizedDescription)"
         }
     }
 }

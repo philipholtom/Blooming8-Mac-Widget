@@ -8,8 +8,21 @@ struct ContentView: View {
     @State private var showSettings: Bool = false
     @State private var ipDraft: String = ""
     @State private var bleNameDraft: String = ""
+    @State private var nasaApiKeyDraft: String = ""
+    @State private var deviceNameDraft: String = ""
+    @State private var maxIdleMinutesDraft: String = ""
+    @State private var sleepDurationHoursDraft: String = ""
+    @State private var wakeSensitivityDraft: String = ""
 
-    @State private var activeTabID: UUID? = nil // nil = the implicit "All" tab
+    @State private var slideshowGallery: String = ""
+    @State private var slideshowDurationDraft: String = "300"
+
+    private enum ActiveSelection: Equatable {
+        case gallery(UUID?) // nil = the implicit "All" tab
+        case generated
+    }
+
+    @State private var activeSelection: ActiveSelection = .gallery(nil)
     @State private var unlockPasswordDraft: String = ""
     @State private var unlockError: Bool = false
 
@@ -75,15 +88,33 @@ struct ContentView: View {
         .padding(16)
         .frame(width: 300)
         .task {
-            ipDraft = settings.deviceIP
-            bleNameDraft = settings.bleDeviceName
+            populateSettingsDrafts()
             if !settings.deviceIP.isEmpty {
                 await controller.refreshCurrentPhoto()
                 await controller.loadGalleries()
             } else {
                 showSettings = true
             }
+            populateSettingsDrafts() // pick up device values fetched above
+            if slideshowGallery.isEmpty {
+                slideshowGallery = controller.galleries.first ?? ""
+            }
         }
+        .onChange(of: controller.galleries) { names in
+            if slideshowGallery.isEmpty {
+                slideshowGallery = names.first ?? ""
+            }
+        }
+    }
+
+    private func populateSettingsDrafts() {
+        ipDraft = settings.deviceIP
+        bleNameDraft = settings.bleDeviceName
+        nasaApiKeyDraft = settings.nasaApiKey
+        deviceNameDraft = controller.deviceName ?? ""
+        maxIdleMinutesDraft = controller.maxIdleSeconds.map { String($0 / 60) } ?? ""
+        sleepDurationHoursDraft = controller.sleepDurationSeconds.map { String($0 / 3600) } ?? ""
+        wakeSensitivityDraft = controller.wakeSensitivity.map(String.init) ?? ""
     }
 
     private var header: some View {
@@ -97,8 +128,7 @@ struct ContentView: View {
             Button {
                 showSettings.toggle()
                 if showSettings {
-                    ipDraft = settings.deviceIP
-                    bleNameDraft = settings.bleDeviceName
+                    populateSettingsDrafts()
                 }
             } label: {
                 Image(systemName: "gearshape")
@@ -146,6 +176,12 @@ struct ContentView: View {
             TextField("e.g. Office", text: $bleNameDraft)
                 .textFieldStyle(.roundedBorder)
 
+            Text("NASA API key (for Photo of the Day — defaults to the public demo key)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("DEMO_KEY", text: $nasaApiKeyDraft)
+                .textFieldStyle(.roundedBorder)
+
             Divider()
 
             if showTabManager {
@@ -160,12 +196,18 @@ struct ContentView: View {
 
             Divider()
 
+            deviceSettingsSection
+
+            Divider()
+
             HStack {
                 Button("Cancel") { showSettings = false }
                 Spacer()
                 Button("Save & Connect") {
                     settings.deviceIP = ipDraft
                     settings.bleDeviceName = bleNameDraft
+                    let trimmedKey = nasaApiKeyDraft.trimmingCharacters(in: .whitespaces)
+                    settings.nasaApiKey = trimmedKey.isEmpty ? "DEMO_KEY" : trimmedKey
                     showSettings = false
                     Task {
                         await controller.refreshCurrentPhoto()
@@ -213,6 +255,61 @@ struct ContentView: View {
                 settings.autoRandomDailyMinute = (components.hour ?? 0) * 60 + (components.minute ?? 0)
             }
         )
+    }
+
+    // MARK: - Device settings (pushed to the frame itself, not just local)
+
+    private var deviceSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Device Settings (applied to the frame)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("Device name", text: $deviceNameDraft)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Text("Auto-sleep after")
+                    .font(.caption)
+                TextField("min", text: $maxIdleMinutesDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 50)
+                Text("min")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("Deep sleep every")
+                    .font(.caption)
+                TextField("hrs", text: $sleepDurationHoursDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 50)
+                Text("hours")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("Wake sensitivity")
+                    .font(.caption)
+                TextField("", text: $wakeSensitivityDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 50)
+            }
+
+            Button("Update Device Settings") {
+                Task {
+                    await controller.updateDeviceSettings(
+                        name: deviceNameDraft.trimmingCharacters(in: .whitespaces).isEmpty ? nil : deviceNameDraft,
+                        sleepDurationSeconds: Int(sleepDurationHoursDraft).map { $0 * 3600 },
+                        maxIdleSeconds: Int(maxIdleMinutesDraft).map { $0 * 60 },
+                        wakeSensitivity: Int(wakeSensitivityDraft)
+                    )
+                    populateSettingsDrafts()
+                }
+            }
+        }
     }
 
     // MARK: - Tab management (Settings)
@@ -306,15 +403,15 @@ struct ContentView: View {
     private func deleteTab(_ tab: GalleryTab) {
         settings.tabs.removeAll { $0.id == tab.id }
         controller.unlockedTabIDs.remove(tab.id)
-        if activeTabID == tab.id { activeTabID = nil }
+        if activeSelection == .gallery(tab.id) { activeSelection = .gallery(nil) }
     }
 
     // MARK: - Main controls
 
     private var controls: some View {
         VStack(spacing: 8) {
-            if !controller.galleries.isEmpty {
-                galleryChecklist
+            galleryChecklist
+            if case .gallery = activeSelection {
                 weightingPicker
             }
 
@@ -327,6 +424,13 @@ struct ContentView: View {
                 }
 
                 Button {
+                    Task { await controller.showNextImage() }
+                } label: {
+                    Image(systemName: "forward.fill")
+                }
+                .help("Show the next image in the frame's current slideshow or playlist")
+
+                Button {
                     Task { await controller.wakeFrame() }
                 } label: {
                     Image(systemName: "bolt.fill")
@@ -334,60 +438,155 @@ struct ContentView: View {
                 .help("Send a Bluetooth wake pulse to the frame")
 
                 Button {
-                    Task { await controller.showRandomPhoto() }
+                    Task {
+                        switch activeSelection {
+                        case .gallery:
+                            await controller.showRandomPhoto()
+                        case .generated:
+                            await controller.showRandomGeneratedContent()
+                        }
+                    }
                 } label: {
                     Label("Random Photo", systemImage: "shuffle")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(settings.selectedGalleries.intersection(controller.availableGalleryNames).isEmpty || controller.isBusy)
+                .disabled(isRandomDisabled || controller.isBusy)
+            }
+
+            if case .gallery = activeSelection {
+                slideshowControls
             }
         }
         .disabled(controller.isBusy)
     }
 
-    private var galleryChecklist: some View {
+    private var slideshowControls: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if !settings.tabs.isEmpty {
-                tabBar
-            }
-
-            if let tab = activeTab, tab.isLocked, !controller.unlockedTabIDs.contains(tab.id) {
-                lockedTabPrompt(tab: tab)
-            } else {
-                Text("Galleries")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(activeTabGalleryNames, id: \.self) { name in
-                        Toggle(name, isOn: gallerySelectionBinding(for: name))
-                            .toggleStyle(.checkbox)
-                    }
-                    if activeTabGalleryNames.isEmpty {
-                        Text("No galleries in this tab.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            Text("Slideshow")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Picker("Gallery", selection: $slideshowGallery) {
+                    ForEach(controller.galleries, id: \.self) { name in
+                        Text(name).tag(name)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .labelsHidden()
+                TextField("sec", text: $slideshowDurationDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 50)
+                Text("sec")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Button("Start") {
+                    let duration = Int(slideshowDurationDraft) ?? 300
+                    Task { await controller.startSlideshow(gallery: slideshowGallery, durationSeconds: duration) }
+                }
+                .disabled(slideshowGallery.isEmpty)
+                Button("Stop") {
+                    Task { await controller.stopSlideshow() }
+                }
             }
         }
     }
+
+    private var isRandomDisabled: Bool {
+        switch activeSelection {
+        case .gallery:
+            return settings.selectedGalleries.intersection(controller.availableGalleryNames).isEmpty
+        case .generated:
+            return settings.selectedContentSources.isEmpty
+        }
+    }
+
+    private var galleryChecklist: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            tabBar
+
+            switch activeSelection {
+            case .generated:
+                contentSourceChecklist
+            case .gallery:
+                if let tab = activeGalleryTab, tab.isLocked, !controller.unlockedTabIDs.contains(tab.id) {
+                    lockedTabPrompt(tab: tab)
+                } else {
+                    Text("Galleries")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(activeTabGalleryNames, id: \.self) { name in
+                            Toggle(name, isOn: gallerySelectionBinding(for: name))
+                                .toggleStyle(.checkbox)
+                        }
+                        if activeTabGalleryNames.isEmpty {
+                            Text("No galleries in this tab.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    // MARK: - Generated content
+
+    private var contentSourceChecklist: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Generated Content")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(ContentSources.all, id: \.id) { source in
+                    Toggle(source.displayName, isOn: contentSourceBinding(for: source.id))
+                        .toggleStyle(.checkbox)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Generates a fresh image and uploads it to that source's own gallery on the frame (e.g. \"NASA\", \"Fortune\").")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func contentSourceBinding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { settings.selectedContentSources.contains(id) },
+            set: { isOn in
+                if isOn {
+                    settings.selectedContentSources.insert(id)
+                } else {
+                    settings.selectedContentSources.remove(id)
+                }
+            }
+        )
+    }
+
+    // MARK: - Tab bar
 
     private var tabBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                tabChip(name: "All", id: nil, isLocked: false)
+                tabChip(name: "All", selection: .gallery(nil), isLocked: false)
                 ForEach(settings.tabs) { tab in
-                    tabChip(name: tab.name, id: tab.id, isLocked: tab.isLocked && !controller.unlockedTabIDs.contains(tab.id))
+                    tabChip(
+                        name: tab.name,
+                        selection: .gallery(tab.id),
+                        isLocked: tab.isLocked && !controller.unlockedTabIDs.contains(tab.id)
+                    )
                 }
+                tabChip(name: "✨ Generated", selection: .generated, isLocked: false)
             }
         }
     }
 
-    private func tabChip(name: String, id: UUID?, isLocked: Bool) -> some View {
+    private func tabChip(name: String, selection: ActiveSelection, isLocked: Bool) -> some View {
         Button {
-            activeTabID = id
+            activeSelection = selection
             unlockPasswordDraft = ""
             unlockError = false
         } label: {
@@ -401,7 +600,7 @@ struct ContentView: View {
             .font(.caption)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(activeTabID == id ? Color.accentColor.opacity(0.25) : Color.gray.opacity(0.15))
+            .background(activeSelection == selection ? Color.accentColor.opacity(0.25) : Color.gray.opacity(0.15))
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -435,8 +634,8 @@ struct ContentView: View {
         }
     }
 
-    private var activeTab: GalleryTab? {
-        guard let id = activeTabID else { return nil }
+    private var activeGalleryTab: GalleryTab? {
+        guard case .gallery(let id?) = activeSelection else { return nil }
         return settings.tabs.first(where: { $0.id == id })
     }
 
@@ -446,7 +645,7 @@ struct ContentView: View {
     }
 
     private var activeTabGalleryNames: [String] {
-        if let tab = activeTab {
+        if let tab = activeGalleryTab {
             return controller.galleries.filter { tab.galleryNames.contains($0) }
         } else {
             return ungroupedGalleryNames
