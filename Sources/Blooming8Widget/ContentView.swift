@@ -327,6 +327,13 @@ struct ContentView: View {
                 }
 
                 Button {
+                    Task { await controller.showNextImage() }
+                } label: {
+                    Image(systemName: "forward.fill")
+                }
+                .help("Show the next image in the frame's current slideshow or playlist")
+
+                Button {
                     Task { await controller.wakeFrame() }
                 } label: {
                     Image(systemName: "bolt.fill")

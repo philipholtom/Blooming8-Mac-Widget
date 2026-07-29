@@ -128,6 +128,17 @@ final class BloominClient {
         try checkStatus(response)
     }
 
+    /// Immediately displays the next image in the frame's current playback
+    /// queue (only meaningful when it's in gallery-slideshow or playlist
+    /// mode, not single-image mode).
+    func showNext(ip: String) async throws {
+        let url = try URL(string: baseURL(ip: ip) + "/showNext")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let (_, response) = try await session.data(for: request)
+        try checkStatus(response)
+    }
+
     func fetchImageData(ip: String, path: String) async throws -> Data {
         let url = try URL(string: baseURL(ip: ip) + path)!
         let (data, response) = try await session.data(from: url)

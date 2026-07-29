@@ -179,6 +179,28 @@ final class PhotoController: ObservableObject {
         }
     }
 
+    /// Advances the frame's current playback queue by one (only meaningful
+    /// when it's in gallery-slideshow or playlist mode), then refreshes the
+    /// preview to whatever it landed on.
+    func showNextImage() async {
+        guard !settings.deviceIP.isEmpty else { return }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await withWakeRetry { try await client.showNext(ip: settings.deviceIP) }
+            let info = try await client.fetchDeviceInfo(ip: settings.deviceIP)
+            applyDeviceInfo(info)
+            if let path = info.image, !path.isEmpty {
+                let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
+                previewImage = NSImage(data: data)
+                currentImagePath = path
+            }
+            statusText = "Showed next image."
+        } catch {
+            statusText = "Couldn't show next image: \(error.localizedDescription)"
+        }
+    }
+
     func refreshCurrentPhoto() async {
         guard !settings.deviceIP.isEmpty else { return }
         isBusy = true
