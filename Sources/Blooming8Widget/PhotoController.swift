@@ -13,6 +13,9 @@ final class PhotoController: ObservableObject {
     @Published var batteryPercent: Int?
     @Published var currentGalleryOnDevice: String?
     @Published var galleries: [String] = []
+    @Published var sleepDurationSeconds: Int?
+    @Published var maxIdleSeconds: Int?
+    @Published var wakeSensitivity: Int?
     @Published var statusText: String = ""
     @Published var isBusy: Bool = false
     /// Tabs unlocked this app session (in-memory only — re-locks on relaunch).
@@ -167,6 +170,9 @@ final class PhotoController: ObservableObject {
         deviceName = info.name
         currentGalleryOnDevice = info.gallery
         batteryPercent = info.battery
+        sleepDurationSeconds = info.sleepDuration
+        maxIdleSeconds = info.maxIdle
+        wakeSensitivity = info.idxWakeSens
     }
 
     private func isConnectivityError(_ error: Error) -> Bool {
@@ -198,6 +204,61 @@ final class PhotoController: ObservableObject {
             statusText = "Showed next image."
         } catch {
             statusText = "Couldn't show next image: \(error.localizedDescription)"
+        }
+    }
+
+    /// Starts a gallery slideshow that cycles on-device every `durationSeconds`.
+    func startSlideshow(gallery: String, durationSeconds: Int) async {
+        guard !gallery.isEmpty else {
+            statusText = "Choose a gallery for the slideshow."
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await withWakeRetry {
+                try await client.startSlideshow(ip: settings.deviceIP, gallery: gallery, durationSeconds: durationSeconds)
+            }
+            currentGalleryOnDevice = gallery
+            statusText = "Started slideshow of '\(gallery)' every \(durationSeconds)s."
+        } catch {
+            statusText = "Couldn't start slideshow: \(error.localizedDescription)"
+        }
+    }
+
+    /// Stops slideshow/playlist playback, returning the frame to single-image mode.
+    func stopSlideshow() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await withWakeRetry { try await client.stopPlayback(ip: settings.deviceIP) }
+            statusText = "Stopped slideshow."
+        } catch {
+            statusText = "Couldn't stop slideshow: \(error.localizedDescription)"
+        }
+    }
+
+    /// Pushes device-level settings (name, sleep timers, wake sensitivity) to
+    /// the frame. Only non-nil values are sent. Refreshes deviceInfo
+    /// afterward so the UI reflects what the frame actually accepted.
+    func updateDeviceSettings(name: String?, sleepDurationSeconds: Int?, maxIdleSeconds: Int?, wakeSensitivity: Int?) async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await withWakeRetry {
+                try await client.updateSettings(
+                    ip: settings.deviceIP,
+                    name: name,
+                    sleepDuration: sleepDurationSeconds,
+                    maxIdle: maxIdleSeconds,
+                    idxWakeSens: wakeSensitivity
+                )
+            }
+            let info = try await client.fetchDeviceInfo(ip: settings.deviceIP)
+            applyDeviceInfo(info)
+            statusText = "Device settings updated."
+        } catch {
+            statusText = "Couldn't update device settings: \(error.localizedDescription)"
         }
     }
 

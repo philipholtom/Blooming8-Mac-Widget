@@ -9,6 +9,13 @@ struct ContentView: View {
     @State private var ipDraft: String = ""
     @State private var bleNameDraft: String = ""
     @State private var nasaApiKeyDraft: String = ""
+    @State private var deviceNameDraft: String = ""
+    @State private var maxIdleMinutesDraft: String = ""
+    @State private var sleepDurationHoursDraft: String = ""
+    @State private var wakeSensitivityDraft: String = ""
+
+    @State private var slideshowGallery: String = ""
+    @State private var slideshowDurationDraft: String = "300"
 
     private enum ActiveSelection: Equatable {
         case gallery(UUID?) // nil = the implicit "All" tab
@@ -81,16 +88,33 @@ struct ContentView: View {
         .padding(16)
         .frame(width: 300)
         .task {
-            ipDraft = settings.deviceIP
-            bleNameDraft = settings.bleDeviceName
-            nasaApiKeyDraft = settings.nasaApiKey
+            populateSettingsDrafts()
             if !settings.deviceIP.isEmpty {
                 await controller.refreshCurrentPhoto()
                 await controller.loadGalleries()
             } else {
                 showSettings = true
             }
+            populateSettingsDrafts() // pick up device values fetched above
+            if slideshowGallery.isEmpty {
+                slideshowGallery = controller.galleries.first ?? ""
+            }
         }
+        .onChange(of: controller.galleries) { names in
+            if slideshowGallery.isEmpty {
+                slideshowGallery = names.first ?? ""
+            }
+        }
+    }
+
+    private func populateSettingsDrafts() {
+        ipDraft = settings.deviceIP
+        bleNameDraft = settings.bleDeviceName
+        nasaApiKeyDraft = settings.nasaApiKey
+        deviceNameDraft = controller.deviceName ?? ""
+        maxIdleMinutesDraft = controller.maxIdleSeconds.map { String($0 / 60) } ?? ""
+        sleepDurationHoursDraft = controller.sleepDurationSeconds.map { String($0 / 3600) } ?? ""
+        wakeSensitivityDraft = controller.wakeSensitivity.map(String.init) ?? ""
     }
 
     private var header: some View {
@@ -104,9 +128,7 @@ struct ContentView: View {
             Button {
                 showSettings.toggle()
                 if showSettings {
-                    ipDraft = settings.deviceIP
-                    bleNameDraft = settings.bleDeviceName
-                    nasaApiKeyDraft = settings.nasaApiKey
+                    populateSettingsDrafts()
                 }
             } label: {
                 Image(systemName: "gearshape")
@@ -174,6 +196,10 @@ struct ContentView: View {
 
             Divider()
 
+            deviceSettingsSection
+
+            Divider()
+
             HStack {
                 Button("Cancel") { showSettings = false }
                 Spacer()
@@ -229,6 +255,61 @@ struct ContentView: View {
                 settings.autoRandomDailyMinute = (components.hour ?? 0) * 60 + (components.minute ?? 0)
             }
         )
+    }
+
+    // MARK: - Device settings (pushed to the frame itself, not just local)
+
+    private var deviceSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Device Settings (applied to the frame)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("Device name", text: $deviceNameDraft)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Text("Auto-sleep after")
+                    .font(.caption)
+                TextField("min", text: $maxIdleMinutesDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 50)
+                Text("min")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("Deep sleep every")
+                    .font(.caption)
+                TextField("hrs", text: $sleepDurationHoursDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 50)
+                Text("hours")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("Wake sensitivity")
+                    .font(.caption)
+                TextField("", text: $wakeSensitivityDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 50)
+            }
+
+            Button("Update Device Settings") {
+                Task {
+                    await controller.updateDeviceSettings(
+                        name: deviceNameDraft.trimmingCharacters(in: .whitespaces).isEmpty ? nil : deviceNameDraft,
+                        sleepDurationSeconds: Int(sleepDurationHoursDraft).map { $0 * 3600 },
+                        maxIdleSeconds: Int(maxIdleMinutesDraft).map { $0 * 60 },
+                        wakeSensitivity: Int(wakeSensitivityDraft)
+                    )
+                    populateSettingsDrafts()
+                }
+            }
+        }
     }
 
     // MARK: - Tab management (Settings)
@@ -372,8 +453,44 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(isRandomDisabled || controller.isBusy)
             }
+
+            if case .gallery = activeSelection {
+                slideshowControls
+            }
         }
         .disabled(controller.isBusy)
+    }
+
+    private var slideshowControls: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Slideshow")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Picker("Gallery", selection: $slideshowGallery) {
+                    ForEach(controller.galleries, id: \.self) { name in
+                        Text(name).tag(name)
+                    }
+                }
+                .labelsHidden()
+                TextField("sec", text: $slideshowDurationDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 50)
+                Text("sec")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Button("Start") {
+                    let duration = Int(slideshowDurationDraft) ?? 300
+                    Task { await controller.startSlideshow(gallery: slideshowGallery, durationSeconds: duration) }
+                }
+                .disabled(slideshowGallery.isEmpty)
+                Button("Stop") {
+                    Task { await controller.stopSlideshow() }
+                }
+            }
+        }
     }
 
     private var isRandomDisabled: Bool {

@@ -5,6 +5,16 @@ struct DeviceInfo: Decodable {
     let image: String?
     let gallery: String?
     let battery: Int?
+    let sleepDuration: Int?
+    let maxIdle: Int?
+    let idxWakeSens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case name, image, gallery, battery
+        case sleepDuration = "sleep_duration"
+        case maxIdle = "max_idle"
+        case idxWakeSens = "idx_wake_sens"
+    }
 }
 
 struct GalleryEntry: Decodable {
@@ -135,6 +145,45 @@ final class BloominClient {
         let url = try URL(string: baseURL(ip: ip) + "/showNext")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        let (_, response) = try await session.data(for: request)
+        try checkStatus(response)
+    }
+
+    /// Starts a gallery slideshow: cycles through `gallery`'s images every
+    /// `durationSeconds`, advancing automatically on-device.
+    func startSlideshow(ip: String, gallery: String, durationSeconds: Int) async throws {
+        let url = try URL(string: baseURL(ip: ip) + "/show")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = ["play_type": 1, "gallery": gallery, "duration": durationSeconds]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (_, response) = try await session.data(for: request)
+        try checkStatus(response)
+    }
+
+    /// Stops slideshow/playlist playback, returning to single-image mode.
+    func stopPlayback(ip: String) async throws {
+        let url = try URL(string: baseURL(ip: ip) + "/stop")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let (_, response) = try await session.data(for: request)
+        try checkStatus(response)
+    }
+
+    /// Updates device-level settings. Only non-nil fields are sent, so a
+    /// call can touch just the name, just the sleep timers, or all of them.
+    func updateSettings(ip: String, name: String? = nil, sleepDuration: Int? = nil, maxIdle: Int? = nil, idxWakeSens: Int? = nil) async throws {
+        let url = try URL(string: baseURL(ip: ip) + "/settings")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var body: [String: Any] = [:]
+        if let name { body["name"] = name }
+        if let sleepDuration { body["sleep_duration"] = sleepDuration }
+        if let maxIdle { body["max_idle"] = maxIdle }
+        if let idxWakeSens { body["idx_wake_sens"] = idxWakeSens }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (_, response) = try await session.data(for: request)
         try checkStatus(response)
     }
