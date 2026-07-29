@@ -281,4 +281,45 @@ final class PhotoController: ObservableObject {
             statusText = "Couldn't show a random photo: \(error.localizedDescription)"
         }
     }
+
+    /// Generates a fresh image from one of the checked content sources
+    /// (chosen at random if more than one is checked), uploads it to that
+    /// source's own gallery (matching whatever the original Python scripts
+    /// already used, e.g. "NASA" for APOD), and displays it immediately.
+    func showRandomGeneratedContent() async {
+        let sources = ContentSources.all.filter { settings.selectedContentSources.contains($0.id) }
+        guard let source = sources.randomElement() else {
+            statusText = "Select at least one content source."
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+            applyDeviceInfo(info)
+
+            statusText = "Generating \(source.displayName)..."
+            let imageData = try await source.generateImage(settings: settings)
+
+            await client.ensureGallery(ip: settings.deviceIP, name: source.galleryName)
+            let filename = "\(source.id)_\(Int(Date().timeIntervalSince1970)).jpg"
+            let path = try await client.uploadImage(
+                ip: settings.deviceIP,
+                filename: filename,
+                gallery: source.galleryName,
+                imageData: imageData,
+                showNow: true
+            )
+
+            previewImage = NSImage(data: imageData)
+            currentImagePath = path
+            currentGalleryOnDevice = source.galleryName
+            statusText = "Showed \(source.displayName)."
+
+            // Pick up the source's gallery in the picker in case it's new.
+            await loadGalleries()
+        } catch {
+            statusText = "Couldn't generate \(source.displayName): \(error.localizedDescription)"
+        }
+    }
 }

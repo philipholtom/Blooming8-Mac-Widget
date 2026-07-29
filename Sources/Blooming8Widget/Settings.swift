@@ -59,6 +59,14 @@ final class Settings: ObservableObject {
     @Published var autoRandomDailyMinute: Int {
         didSet { UserDefaults.standard.set(autoRandomDailyMinute, forKey: "autoRandomDailyMinute") }
     }
+    /// NASA APOD API key. Defaults to NASA's public shared demo key (rate-limited);
+    /// stored locally only, never committed to the repo.
+    @Published var nasaApiKey: String {
+        didSet { UserDefaults.standard.set(nasaApiKey, forKey: "nasaApiKey") }
+    }
+    @Published var selectedContentSources: Set<String> {
+        didSet { UserDefaults.standard.set(Array(selectedContentSources), forKey: "selectedContentSources") }
+    }
 
     init() {
         deviceIP = UserDefaults.standard.string(forKey: "deviceIP") ?? ""
@@ -98,6 +106,13 @@ final class Settings: ObservableObject {
             autoRandomDailyMinute = UserDefaults.standard.integer(forKey: "autoRandomDailyMinute")
         } else {
             autoRandomDailyMinute = 9 * 60 // 9:00 AM default
+        }
+
+        nasaApiKey = UserDefaults.standard.string(forKey: "nasaApiKey") ?? "DEMO_KEY"
+        if let stored = UserDefaults.standard.stringArray(forKey: "selectedContentSources") {
+            selectedContentSources = Set(stored)
+        } else {
+            selectedContentSources = []
         }
     }
 }
