@@ -121,6 +121,93 @@ final class PhotoController: ObservableObject {
         }
     }
 
+    /// Uploads local image files into a gallery, converting each to baseline
+    /// JPEG first (the frame's /upload endpoint expects JPEG; re-encoding
+    /// also smooths over exotic source formats/color profiles). Creates the
+    /// gallery if it doesn't already exist. Does not display any of them —
+    /// this is a bulk import, not a "show now" action.
+    func uploadPhotos(urls: [URL], gallery: String) async {
+        let trimmedGallery = gallery.trimmingCharacters(in: .whitespaces)
+        guard !trimmedGallery.isEmpty else {
+            statusText = "Choose or type a gallery to upload into."
+            return
+        }
+        guard !urls.isEmpty else { return }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+            applyDeviceInfo(info)
+            await client.ensureGallery(ip: settings.deviceIP, name: trimmedGallery)
+
+            var uploaded = 0
+            var failed = 0
+            for (index, url) in urls.enumerated() {
+                statusText = "Uploading \(url.lastPathComponent) (\(index + 1)/\(urls.count))..."
+                guard let data = try? Data(contentsOf: url),
+                      let image = NSImage(data: data),
+                      let jpeg = ImageCanvas.jpegData(image)
+                else {
+                    failed += 1
+                    continue
+                }
+                let baseName = url.deletingPathExtension().lastPathComponent
+                let filename = "\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(index).jpg"
+                do {
+                    _ = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: trimmedGallery, imageData: jpeg, showNow: false)
+                    uploaded += 1
+                } catch {
+                    failed += 1
+                }
+            }
+            let failedSuffix = failed > 0 ? " (\(failed) failed)" : ""
+            statusText = "Uploaded \(uploaded) of \(urls.count) photo\(urls.count == 1 ? "" : "s") to '\(trimmedGallery)'\(failedSuffix)."
+            await loadGalleries()
+        } catch {
+            statusText = "Couldn't upload: \(error.localizedDescription)"
+        }
+    }
+
+    /// Downloads every photo in a gallery into a subfolder (named after the
+    /// gallery) inside the chosen destination folder.
+    func downloadGallery(_ gallery: String, to folder: URL) async {
+        guard !gallery.isEmpty else {
+            statusText = "Choose a gallery to download."
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+            applyDeviceInfo(info)
+            let names = try await client.fetchAllImages(ip: settings.deviceIP, gallery: gallery)
+            guard !names.isEmpty else {
+                statusText = "'\(gallery)' has no photos to download."
+                return
+            }
+
+            let destination = folder.appendingPathComponent(gallery, isDirectory: true)
+            try? FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+
+            var downloaded = 0
+            var failed = 0
+            for (index, name) in names.enumerated() {
+                statusText = "Downloading \(name) (\(index + 1)/\(names.count))..."
+                do {
+                    let data = try await client.fetchImageData(ip: settings.deviceIP, path: "/gallerys/\(gallery)/\(name)")
+                    try data.write(to: destination.appendingPathComponent(name))
+                    downloaded += 1
+                } catch {
+                    failed += 1
+                }
+            }
+            let failedSuffix = failed > 0 ? " (\(failed) failed)" : ""
+            statusText = "Downloaded \(downloaded) of \(names.count) photo\(names.count == 1 ? "" : "s") to \(destination.path)\(failedSuffix)."
+        } catch {
+            statusText = "Couldn't download: \(error.localizedDescription)"
+        }
+    }
+
     /// Sends a Bluetooth wake pulse on demand (e.g. from a button or menu item),
     /// independent of any HTTP call failing first.
     @discardableResult

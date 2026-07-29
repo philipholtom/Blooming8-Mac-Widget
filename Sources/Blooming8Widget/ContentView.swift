@@ -17,6 +17,9 @@ struct ContentView: View {
     @State private var slideshowGallery: String = ""
     @State private var slideshowDurationDraft: String = "300"
 
+    @State private var manageGallery: String = ""
+    @State private var newGalleryNameForUpload: String = ""
+
     private enum ActiveSelection: Equatable {
         case gallery(UUID?) // nil = the implicit "All" tab
         case generated
@@ -99,10 +102,16 @@ struct ContentView: View {
             if slideshowGallery.isEmpty {
                 slideshowGallery = controller.galleries.first ?? ""
             }
+            if manageGallery.isEmpty {
+                manageGallery = controller.galleries.first ?? ""
+            }
         }
         .onChange(of: controller.galleries) { names in
             if slideshowGallery.isEmpty {
                 slideshowGallery = names.first ?? ""
+            }
+            if manageGallery.isEmpty {
+                manageGallery = names.first ?? ""
             }
         }
     }
@@ -189,6 +198,10 @@ struct ContentView: View {
             } else {
                 Button("Manage Tabs (\(settings.tabs.count))...") { showTabManager = true }
             }
+
+            Divider()
+
+            photoManagementSection
 
             Divider()
 
@@ -308,6 +321,47 @@ struct ContentView: View {
                     )
                     populateSettingsDrafts()
                 }
+            }
+        }
+    }
+
+    // MARK: - Upload / download photos (Settings)
+
+    private var photoManagementSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Upload / Download Photos")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if !controller.galleries.isEmpty {
+                Picker("Gallery", selection: $manageGallery) {
+                    ForEach(controller.galleries, id: \.self) { name in
+                        Text(name).tag(name)
+                    }
+                }
+                .labelsHidden()
+            }
+
+            TextField("or type a new gallery name to upload into", text: $newGalleryNameForUpload)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Button("Upload Photos...") {
+                    let urls = FilePicker.chooseImages()
+                    guard !urls.isEmpty else { return }
+                    let trimmedNew = newGalleryNameForUpload.trimmingCharacters(in: .whitespaces)
+                    let targetGallery = trimmedNew.isEmpty ? manageGallery : trimmedNew
+                    Task {
+                        await controller.uploadPhotos(urls: urls, gallery: targetGallery)
+                        newGalleryNameForUpload = ""
+                    }
+                }
+
+                Button("Download Gallery...") {
+                    guard !manageGallery.isEmpty, let folder = FilePicker.chooseFolder() else { return }
+                    Task { await controller.downloadGallery(manageGallery, to: folder) }
+                }
+                .disabled(manageGallery.isEmpty)
             }
         }
     }
