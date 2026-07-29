@@ -424,6 +424,13 @@ struct ContentView: View {
                 }
 
                 Button {
+                    Task { await controller.redisplayCurrentPhoto() }
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                }
+                .help("Re-send the current photo to the frame — use this if the screen didn't actually update")
+
+                Button {
                     Task { await controller.showNextImage() }
                 } label: {
                     Image(systemName: "forward.fill")

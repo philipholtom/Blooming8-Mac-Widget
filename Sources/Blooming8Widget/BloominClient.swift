@@ -41,6 +41,7 @@ enum BloominError: LocalizedError {
     case noDeviceIP
     case badResponse(String)
     case http(Int)
+    case busy(String)
 
     var errorDescription: String? {
         switch self {
@@ -50,6 +51,8 @@ enum BloominError: LocalizedError {
             return "Unexpected response: \(detail)"
         case .http(let code):
             return "Frame returned HTTP \(code)."
+        case .busy(let reason):
+            return "Frame is busy (\(reason))."
         }
     }
 }
@@ -127,6 +130,15 @@ final class BloominClient {
         return allNames
     }
 
+    private struct ShowResponse: Decodable {
+        let status: String?
+        let msg: String?
+    }
+
+    /// The frame can reject a /show call while it's still drawing the
+    /// previous one — observed both as HTTP 500 and, inconsistently, as
+    /// HTTP 200 with `{"status":"fail","msg":"DRAWING"}` in the body. Check
+    /// both shapes so callers can reliably detect and retry on this.
     func show(ip: String, imagePath: String) async throws {
         let url = try URL(string: baseURL(ip: ip) + "/show")!
         var request = URLRequest(url: url)
@@ -134,7 +146,11 @@ final class BloominClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let body: [String: Any] = ["play_type": 0, "image": imagePath]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (_, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
+        let decoded = try? JSONDecoder().decode(ShowResponse.self, from: data)
+        if decoded?.status == "fail" {
+            throw BloominError.busy(decoded?.msg ?? "unknown reason")
+        }
         try checkStatus(response)
     }
 
