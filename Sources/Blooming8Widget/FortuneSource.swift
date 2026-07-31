@@ -147,15 +147,12 @@ struct FortuneSource: ContentSource {
             border.stroke()
 
             let quoteFont = NSFont(name: "Helvetica", size: 36) ?? NSFont.systemFont(ofSize: 36)
-            let quoteAttrs: [NSAttributedString.Key: Any] = [.font: quoteFont, .foregroundColor: scheme.text]
             let wrapped = wrapText(quote, maxCharsPerLine: 50)
             let lineHeight: CGFloat = 50
             let totalTextHeight = CGFloat(wrapped.count) * lineHeight
             var currentY = (CGFloat(self.height) - totalTextHeight) / 2 - 100
             for line in wrapped {
-                let nsLine = line as NSString
-                let size = nsLine.size(withAttributes: quoteAttrs)
-                nsLine.draw(at: NSPoint(x: (CGFloat(self.width) - size.width) / 2, y: currentY), withAttributes: quoteAttrs)
+                drawCentered(line, font: quoteFont, color: scheme.text, y: currentY, canvasWidth: self.width)
                 currentY += lineHeight
             }
 
@@ -172,13 +169,7 @@ struct FortuneSource: ContentSource {
             let authorFont = NSFont(name: "Helvetica", size: 20) ?? NSFont.systemFont(ofSize: 20)
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "MMMM d, yyyy"
-            let dateText = dateFormatter.string(from: Date()) as NSString
-            let dateAttrs: [NSAttributedString.Key: Any] = [.font: authorFont, .foregroundColor: scheme.accent]
-            let dateSize = dateText.size(withAttributes: dateAttrs)
-            dateText.draw(
-                at: NSPoint(x: (CGFloat(self.width) - dateSize.width) / 2, y: CGFloat(self.height) - 80),
-                withAttributes: dateAttrs
-            )
+            drawCentered(dateFormatter.string(from: Date()), font: authorFont, color: scheme.accent, y: CGFloat(self.height) - 80, canvasWidth: self.width)
         }
     }
 }

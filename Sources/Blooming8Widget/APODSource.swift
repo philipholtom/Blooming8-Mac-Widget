@@ -104,27 +104,18 @@ struct APODSource: ContentSource {
             }
             let xOffset = self.borderWidth + (contentWidth - newWidth) / 2
             let yOffset = self.borderWidth + self.textAreaTop + (contentHeight - newHeight) / 2
-            image.draw(in: NSRect(x: xOffset, y: yOffset, width: newWidth, height: newHeight))
+            drawImage(image, in: NSRect(x: xOffset, y: yOffset, width: newWidth, height: newHeight))
 
             let titleFont = NSFont(name: "Helvetica", size: 28) ?? NSFont.systemFont(ofSize: 28)
             let textFont = NSFont(name: "Helvetica", size: 16) ?? NSFont.systemFont(ofSize: 16)
 
-            let dateText = "APOD: \(date)" as NSString
-            let dateAttrs: [NSAttributedString.Key: Any] = [.font: titleFont, .foregroundColor: NSColor.black]
-            let dateSize = dateText.size(withAttributes: dateAttrs)
-            dateText.draw(
-                at: NSPoint(x: (CGFloat(self.width) - dateSize.width) / 2, y: self.borderWidth + 15),
-                withAttributes: dateAttrs
-            )
+            drawCentered("APOD: \(date)", font: titleFont, color: .black, y: self.borderWidth + 15, canvasWidth: self.width)
 
-            let descAttrs: [NSAttributedString.Key: Any] = [.font: textFont, .foregroundColor: NSColor.black]
             let wrapped = wrapText(description, maxCharsPerLine: 60, maxLines: 5)
             var descY = CGFloat(self.height) - self.textAreaBottom + self.borderWidth
             let lineHeight: CGFloat = 18
             for line in wrapped {
-                let nsLine = line as NSString
-                let lineSize = nsLine.size(withAttributes: descAttrs)
-                nsLine.draw(at: NSPoint(x: (CGFloat(self.width) - lineSize.width) / 2, y: descY), withAttributes: descAttrs)
+                drawCentered(line, font: textFont, color: .black, y: descY, canvasWidth: self.width)
                 descY += lineHeight
             }
         }

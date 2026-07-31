@@ -34,7 +34,6 @@ struct ContentView: View {
     @State private var unlockPasswordDraft: String = ""
     @State private var unlockError: Bool = false
 
-    @State private var showTabManager: Bool = false
     @State private var newTabName: String = ""
     @State private var passwordDrafts: [UUID: String] = [:]
 
@@ -202,27 +201,23 @@ struct ContentView: View {
 
             Divider()
 
-            if showTabManager {
-                tabManagerView
-            } else {
-                Button("Manage Tabs (\(settings.tabs.count))...") { showTabManager = true }
+            Group {
+                DisclosureGroup("Manage Tabs (\(settings.tabs.count))") {
+                    tabManagerView
+                }
+                DisclosureGroup("Upload / Download Photos") {
+                    photoManagementSection
+                }
+                DisclosureGroup("Automatic Random Photo") {
+                    autoRandomSection
+                }
+                DisclosureGroup("Device Settings") {
+                    deviceSettingsSection
+                }
+                DisclosureGroup("Generated Content Settings") {
+                    generatedContentSettingsSection
+                }
             }
-
-            Divider()
-
-            photoManagementSection
-
-            Divider()
-
-            autoRandomSection
-
-            Divider()
-
-            deviceSettingsSection
-
-            Divider()
-
-            generatedContentSettingsSection
 
             Divider()
 
@@ -292,8 +287,8 @@ struct ContentView: View {
 
     private var deviceSettingsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Device Settings (applied to the frame)")
-                .font(.caption)
+            Text("Applied directly to the frame, not just saved locally.")
+                .font(.caption2)
                 .foregroundStyle(.secondary)
 
             TextField("Device name", text: $deviceNameDraft)
@@ -347,10 +342,6 @@ struct ContentView: View {
 
     private var generatedContentSettingsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Generated Content Settings")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             TextField("Weather location name", text: $weatherLocationNameDraft)
                 .textFieldStyle(.roundedBorder)
             HStack {
@@ -377,10 +368,6 @@ struct ContentView: View {
 
     private var photoManagementSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Upload / Download Photos")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             if !controller.galleries.isEmpty {
                 Picker("Gallery", selection: $manageGallery) {
                     ForEach(controller.galleries, id: \.self) { name in
@@ -437,8 +424,6 @@ struct ContentView: View {
                 }
                 .disabled(newTabName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-
-            Button("Done") { showTabManager = false }
         }
     }
 
@@ -539,7 +524,6 @@ struct ContentView: View {
                     Button("Save Photo...") {
                         savePhoto()
                     }
-                    .disabled(controller.currentImageData == nil)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }

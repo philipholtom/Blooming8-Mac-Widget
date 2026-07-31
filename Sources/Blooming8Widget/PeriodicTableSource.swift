@@ -144,7 +144,7 @@ struct PeriodicTableSource: ContentSource {
             if let elementImage {
                 let imageSize: CGFloat = 300
                 let imageRect = NSRect(x: (CGFloat(self.width) - imageSize) / 2, y: bottomY, width: imageSize, height: imageSize)
-                elementImage.draw(in: imageRect)
+                drawImage(elementImage, in: imageRect)
                 bottomY += imageSize + 40
             }
 
