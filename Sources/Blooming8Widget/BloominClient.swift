@@ -255,6 +255,19 @@ final class BloominClient {
         return try JSONDecoder().decode(UploadResponse.self, from: data).path
     }
 
+    /// Deletes a single image from a gallery on the device.
+    func deleteImage(ip: String, filename: String, gallery: String) async throws {
+        var components = URLComponents(string: try baseURL(ip: ip) + "/image/delete")!
+        components.queryItems = [
+            URLQueryItem(name: "image", value: filename),
+            URLQueryItem(name: "gallery", value: gallery)
+        ]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        let (_, response) = try await session.data(for: request)
+        try checkStatus(response)
+    }
+
     private func checkStatus(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else {
             throw BloominError.badResponse("no HTTP response")

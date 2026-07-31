@@ -20,16 +20,21 @@ struct ContentView: View {
     @State private var manageGallery: String = ""
     @State private var newGalleryNameForUpload: String = ""
 
+    @State private var weatherLocationNameDraft: String = ""
+    @State private var weatherLatitudeDraft: String = ""
+    @State private var weatherLongitudeDraft: String = ""
+    @State private var historyHighlightYearDraft: String = ""
+
     private enum ActiveSelection: Equatable {
         case gallery(UUID?) // nil = the implicit "All" tab
         case generated
+        case localFolder
     }
 
     @State private var activeSelection: ActiveSelection = .gallery(nil)
     @State private var unlockPasswordDraft: String = ""
     @State private var unlockError: Bool = false
 
-    @State private var showTabManager: Bool = false
     @State private var newTabName: String = ""
     @State private var passwordDrafts: [UUID: String] = [:]
 
@@ -124,6 +129,10 @@ struct ContentView: View {
         maxIdleMinutesDraft = controller.maxIdleSeconds.map { String($0 / 60) } ?? ""
         sleepDurationHoursDraft = controller.sleepDurationSeconds.map { String($0 / 3600) } ?? ""
         wakeSensitivityDraft = controller.wakeSensitivity.map(String.init) ?? ""
+        weatherLocationNameDraft = settings.weatherLocationName
+        weatherLatitudeDraft = String(settings.weatherLatitude)
+        weatherLongitudeDraft = String(settings.weatherLongitude)
+        historyHighlightYearDraft = String(settings.historyHighlightYear)
     }
 
     private var header: some View {
@@ -193,23 +202,23 @@ struct ContentView: View {
 
             Divider()
 
-            if showTabManager {
-                tabManagerView
-            } else {
-                Button("Manage Tabs (\(settings.tabs.count))...") { showTabManager = true }
+            Group {
+                DisclosureGroup("Manage Tabs (\(settings.tabs.count))") {
+                    tabManagerView
+                }
+                DisclosureGroup("Upload / Download Photos") {
+                    photoManagementSection
+                }
+                DisclosureGroup("Automatic Random Photo") {
+                    autoRandomSection
+                }
+                DisclosureGroup("Device Settings") {
+                    deviceSettingsSection
+                }
+                DisclosureGroup("Generated Content Settings") {
+                    generatedContentSettingsSection
+                }
             }
-
-            Divider()
-
-            photoManagementSection
-
-            Divider()
-
-            autoRandomSection
-
-            Divider()
-
-            deviceSettingsSection
 
             Divider()
 
@@ -221,6 +230,11 @@ struct ContentView: View {
                     settings.bleDeviceName = bleNameDraft
                     let trimmedKey = nasaApiKeyDraft.trimmingCharacters(in: .whitespaces)
                     settings.nasaApiKey = trimmedKey.isEmpty ? "DEMO_KEY" : trimmedKey
+                    let trimmedLocation = weatherLocationNameDraft.trimmingCharacters(in: .whitespaces)
+                    settings.weatherLocationName = trimmedLocation.isEmpty ? "Radlett, UK" : trimmedLocation
+                    if let lat = Double(weatherLatitudeDraft) { settings.weatherLatitude = lat }
+                    if let lon = Double(weatherLongitudeDraft) { settings.weatherLongitude = lon }
+                    if let year = Int(historyHighlightYearDraft) { settings.historyHighlightYear = year }
                     showSettings = false
                     Task {
                         await controller.refreshCurrentPhoto()
@@ -274,8 +288,8 @@ struct ContentView: View {
 
     private var deviceSettingsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Device Settings (applied to the frame)")
-                .font(.caption)
+            Text("Applied directly to the frame, not just saved locally.")
+                .font(.caption2)
                 .foregroundStyle(.secondary)
 
             TextField("Device name", text: $deviceNameDraft)
@@ -325,14 +339,36 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Generated content settings (Weather location, History year)
+
+    private var generatedContentSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Weather location name", text: $weatherLocationNameDraft)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                TextField("Latitude", text: $weatherLatitudeDraft)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Longitude", text: $weatherLongitudeDraft)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            HStack {
+                Text("History highlight year")
+                    .font(.caption)
+                TextField("1979", text: $historyHighlightYearDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 70)
+            }
+            Text("If today has a historical event from this year, it's always shown first.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     // MARK: - Upload / download photos (Settings)
 
     private var photoManagementSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Upload / Download Photos")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             if !controller.galleries.isEmpty {
                 Picker("Gallery", selection: $manageGallery) {
                     ForEach(controller.galleries, id: \.self) { name in
@@ -389,8 +425,6 @@ struct ContentView: View {
                 }
                 .disabled(newTabName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-
-            Button("Done") { showTabManager = false }
         }
     }
 
@@ -487,12 +521,16 @@ struct ContentView: View {
                     Button("Wake Frame") {
                         Task { await controller.wakeFrame() }
                     }
+                    Divider()
+                    Button("Save Photo...") {
+                        savePhoto()
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("More: redisplay, show next, wake frame")
+                .help("More: redisplay, show next, wake frame, save photo")
 
                 Button {
                     Task {
@@ -501,6 +539,8 @@ struct ContentView: View {
                             await controller.showRandomPhoto()
                         case .generated:
                             await controller.showRandomGeneratedContent()
+                        case .localFolder:
+                            await controller.showRandomLocalFolderPhoto()
                         }
                     }
                 } label: {
@@ -550,12 +590,24 @@ struct ContentView: View {
         }
     }
 
+    private func savePhoto() {
+        guard let data = controller.currentImageData else { return }
+        let panel = NSSavePanel()
+        panel.title = "Save Photo"
+        panel.nameFieldStringValue = controller.currentImagePath.map { ($0 as NSString).lastPathComponent } ?? "photo.jpg"
+        if panel.runModal() == .OK, let url = panel.url {
+            try? data.write(to: url)
+        }
+    }
+
     private var isRandomDisabled: Bool {
         switch activeSelection {
         case .gallery:
             return settings.selectedGalleries.intersection(controller.availableGalleryNames).isEmpty
         case .generated:
             return settings.selectedContentSources.isEmpty
+        case .localFolder:
+            return settings.randomFolderPath.trimmingCharacters(in: .whitespaces).isEmpty
         }
     }
 
@@ -566,6 +618,8 @@ struct ContentView: View {
             switch activeSelection {
             case .generated:
                 contentSourceChecklist
+            case .localFolder:
+                localFolderSection
             case .gallery:
                 if let tab = activeGalleryTab, tab.isLocked, !controller.unlockedTabIDs.contains(tab.id) {
                     lockedTabPrompt(tab: tab)
@@ -623,6 +677,32 @@ struct ContentView: View {
         )
     }
 
+    // MARK: - Local folder
+
+    private var localFolderSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Local Folder")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Text(settings.randomFolderPath.isEmpty ? "No folder selected" : settings.randomFolderPath)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button("Choose...") {
+                    if let folder = FilePicker.chooseFolder(title: "Choose a Folder of Photos") {
+                        settings.randomFolderPath = folder.path
+                    }
+                }
+            }
+            Text("Picks a random photo from this folder (including subfolders) and uploads it to a \"Random\" gallery on the frame, deleting whatever photo was there before.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     // MARK: - Tab bar
 
     private var tabBar: some View {
@@ -637,6 +717,7 @@ struct ContentView: View {
                     )
                 }
                 tabChip(name: "✨ Generated", selection: .generated, isLocked: false)
+                tabChip(name: "📁 Local Folder", selection: .localFolder, isLocked: false)
             }
         }
     }

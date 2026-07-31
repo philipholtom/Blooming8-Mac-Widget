@@ -8,6 +8,9 @@ final class PhotoController: ObservableObject {
     private let bleWaker = BLEWaker()
 
     @Published var previewImage: NSImage?
+    /// Raw bytes behind `previewImage`, kept alongside it so "Save Photo"
+    /// can write the exact original file rather than a re-encoded copy.
+    @Published var currentImageData: Data?
     @Published var currentImagePath: String?
     @Published var deviceName: String?
     @Published var batteryPercent: Int?
@@ -121,11 +124,13 @@ final class PhotoController: ObservableObject {
         }
     }
 
-    /// Uploads local image files into a gallery, converting each to baseline
-    /// JPEG first (the frame's /upload endpoint expects JPEG; re-encoding
-    /// also smooths over exotic source formats/color profiles). Creates the
-    /// gallery if it doesn't already exist. Does not display any of them —
-    /// this is a bulk import, not a "show now" action.
+    /// Uploads local image files into a gallery, letterbox-fitting each into
+    /// the frame's 1200x1600 canvas and converting to JPEG first (the frame's
+    /// /upload endpoint expects JPEG; this also avoids the frame cropping a
+    /// mismatched aspect ratio to fill its screen, and color-manages
+    /// wide-gamut/HDR sources like HEIC correctly). Creates the gallery if it
+    /// doesn't already exist. Does not display any of them — this is a bulk
+    /// import, not a "show now" action.
     func uploadPhotos(urls: [URL], gallery: String) async {
         let trimmedGallery = gallery.trimmingCharacters(in: .whitespaces)
         guard !trimmedGallery.isEmpty else {
@@ -144,9 +149,9 @@ final class PhotoController: ObservableObject {
             var failed = 0
             for (index, url) in urls.enumerated() {
                 statusText = "Uploading \(url.lastPathComponent) (\(index + 1)/\(urls.count))..."
-                guard let data = try? Data(contentsOf: url),
-                      let image = NSImage(data: data),
-                      let jpeg = ImageCanvas.jpegData(image)
+                guard let cgImage = loadUprightCGImage(at: url),
+                      let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+                      let jpeg = ImageCanvas.jpegData(framed)
                 else {
                     failed += 1
                     continue
@@ -308,6 +313,7 @@ final class PhotoController: ObservableObject {
 
             let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
             previewImage = NSImage(data: data)
+            currentImageData = data
             currentImagePath = path
             statusText = "Redisplayed the current photo."
         } catch {
@@ -329,6 +335,7 @@ final class PhotoController: ObservableObject {
             if let path = info.image, !path.isEmpty {
                 let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
                 previewImage = NSImage(data: data)
+                currentImageData = data
                 currentImagePath = path
             }
             statusText = "Showed next image."
@@ -402,6 +409,7 @@ final class PhotoController: ObservableObject {
             if let path = info.image, !path.isEmpty {
                 let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
                 previewImage = NSImage(data: data)
+                currentImageData = data
                 currentImagePath = path
             }
             statusText = ""
@@ -465,6 +473,7 @@ final class PhotoController: ObservableObject {
             try await client.show(ip: settings.deviceIP, imagePath: path)
             let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
             previewImage = NSImage(data: data)
+            currentImageData = data
             currentImagePath = path
             currentGalleryOnDevice = picked.gallery
             statusText = statusMessage
@@ -503,6 +512,7 @@ final class PhotoController: ObservableObject {
             )
 
             previewImage = NSImage(data: imageData)
+            currentImageData = imageData
             currentImagePath = path
             currentGalleryOnDevice = source.galleryName
             statusText = "Showed \(source.displayName)."
@@ -512,5 +522,79 @@ final class PhotoController: ObservableObject {
         } catch {
             statusText = "Couldn't generate \(source.displayName): \(error.localizedDescription)"
         }
+    }
+
+    private static let imageFileExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "gif", "bmp", "tiff", "tif", "webp"]
+
+    /// Picks a random image from the local folder in Settings and uploads it
+    /// to a "Random" gallery on the frame. That gallery is meant to hold
+    /// exactly one photo at a time, so whatever's already in it is deleted
+    /// first rather than left to accumulate.
+    func showRandomLocalFolderPhoto() async {
+        let folderPath = settings.randomFolderPath.trimmingCharacters(in: .whitespaces)
+        guard !folderPath.isEmpty else {
+            statusText = "Choose a folder to pick random photos from."
+            return
+        }
+        let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
+        guard let chosen = enumerateImageFiles(in: folderURL).randomElement() else {
+            statusText = "No photos found in '\(folderURL.lastPathComponent)'."
+            return
+        }
+        guard let cgImage = loadUprightCGImage(at: chosen),
+              let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+              let jpeg = ImageCanvas.jpegData(framed)
+        else {
+            statusText = "Couldn't read '\(chosen.lastPathComponent)'."
+            return
+        }
+
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+            applyDeviceInfo(info)
+
+            let gallery = "Random"
+            await client.ensureGallery(ip: settings.deviceIP, name: gallery)
+
+            let existing = try await client.fetchAllImages(ip: settings.deviceIP, gallery: gallery)
+            var deleteFailures = 0
+            for name in existing {
+                do {
+                    try await client.deleteImage(ip: settings.deviceIP, filename: name, gallery: gallery)
+                } catch {
+                    deleteFailures += 1
+                }
+            }
+
+            let filename = "\(chosen.deletingPathExtension().lastPathComponent)_\(Int(Date().timeIntervalSince1970)).jpg"
+            let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: jpeg, showNow: true)
+
+            previewImage = NSImage(data: jpeg)
+            currentImageData = jpeg
+            currentImagePath = path
+            currentGalleryOnDevice = gallery
+            let deleteWarning = deleteFailures > 0 ? " (\(deleteFailures) old photo\(deleteFailures == 1 ? "" : "s") couldn't be removed)" : ""
+            statusText = "Showed '\(chosen.lastPathComponent)' from local folder.\(deleteWarning)"
+
+            await loadGalleries()
+        } catch {
+            statusText = "Couldn't show a random local photo: \(error.localizedDescription)"
+        }
+    }
+
+    private func enumerateImageFiles(in folder: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: folder,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var files: [URL] = []
+        for case let url as URL in enumerator where Self.imageFileExtensions.contains(url.pathExtension.lowercased()) {
+            files.append(url)
+        }
+        return files
     }
 }
