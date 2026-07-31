@@ -16,9 +16,9 @@ enum FilePicker {
         return panel.runModal() == .OK ? panel.urls : []
     }
 
-    static func chooseFolder() -> URL? {
+    static func chooseFolder(title: String = "Choose a Folder to Save Photos Into") -> URL? {
         let panel = NSOpenPanel()
-        panel.title = "Choose a Folder to Save Photos Into"
+        panel.title = title
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false

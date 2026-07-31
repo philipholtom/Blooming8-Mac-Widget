@@ -82,6 +82,12 @@ final class Settings: ObservableObject {
     @Published var historyHighlightYear: Int {
         didSet { UserDefaults.standard.set(historyHighlightYear, forKey: "historyHighlightYear") }
     }
+    /// A folder on this Mac to pick random photos from for the "Local Folder"
+    /// tab. Stored as a plain path — the app isn't sandboxed, so no
+    /// security-scoped bookmark is needed to keep reading it after relaunch.
+    @Published var randomFolderPath: String {
+        didSet { UserDefaults.standard.set(randomFolderPath, forKey: "randomFolderPath") }
+    }
 
     init() {
         deviceIP = UserDefaults.standard.string(forKey: "deviceIP") ?? ""
@@ -137,5 +143,6 @@ final class Settings: ObservableObject {
             ? UserDefaults.standard.double(forKey: "weatherLongitude") : -0.3505
         historyHighlightYear = UserDefaults.standard.object(forKey: "historyHighlightYear") != nil
             ? UserDefaults.standard.integer(forKey: "historyHighlightYear") : 1979
+        randomFolderPath = UserDefaults.standard.string(forKey: "randomFolderPath") ?? ""
     }
 }

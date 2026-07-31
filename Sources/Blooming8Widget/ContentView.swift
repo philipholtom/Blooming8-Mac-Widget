@@ -28,6 +28,7 @@ struct ContentView: View {
     private enum ActiveSelection: Equatable {
         case gallery(UUID?) // nil = the implicit "All" tab
         case generated
+        case localFolder
     }
 
     @State private var activeSelection: ActiveSelection = .gallery(nil)
@@ -538,6 +539,8 @@ struct ContentView: View {
                             await controller.showRandomPhoto()
                         case .generated:
                             await controller.showRandomGeneratedContent()
+                        case .localFolder:
+                            await controller.showRandomLocalFolderPhoto()
                         }
                     }
                 } label: {
@@ -603,6 +606,8 @@ struct ContentView: View {
             return settings.selectedGalleries.intersection(controller.availableGalleryNames).isEmpty
         case .generated:
             return settings.selectedContentSources.isEmpty
+        case .localFolder:
+            return settings.randomFolderPath.trimmingCharacters(in: .whitespaces).isEmpty
         }
     }
 
@@ -613,6 +618,8 @@ struct ContentView: View {
             switch activeSelection {
             case .generated:
                 contentSourceChecklist
+            case .localFolder:
+                localFolderSection
             case .gallery:
                 if let tab = activeGalleryTab, tab.isLocked, !controller.unlockedTabIDs.contains(tab.id) {
                     lockedTabPrompt(tab: tab)
@@ -670,6 +677,32 @@ struct ContentView: View {
         )
     }
 
+    // MARK: - Local folder
+
+    private var localFolderSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Local Folder")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Text(settings.randomFolderPath.isEmpty ? "No folder selected" : settings.randomFolderPath)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button("Choose...") {
+                    if let folder = FilePicker.chooseFolder(title: "Choose a Folder of Photos") {
+                        settings.randomFolderPath = folder.path
+                    }
+                }
+            }
+            Text("Picks a random photo from this folder (including subfolders) and uploads it to a \"Random\" gallery on the frame, deleting whatever photo was there before.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     // MARK: - Tab bar
 
     private var tabBar: some View {
@@ -684,6 +717,7 @@ struct ContentView: View {
                     )
                 }
                 tabChip(name: "✨ Generated", selection: .generated, isLocked: false)
+                tabChip(name: "📁 Local Folder", selection: .localFolder, isLocked: false)
             }
         }
     }

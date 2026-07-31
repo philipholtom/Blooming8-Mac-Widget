@@ -521,4 +521,78 @@ final class PhotoController: ObservableObject {
             statusText = "Couldn't generate \(source.displayName): \(error.localizedDescription)"
         }
     }
+
+    private static let imageFileExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "gif", "bmp", "tiff", "tif", "webp"]
+
+    /// Picks a random image from the local folder in Settings and uploads it
+    /// to a "Random" gallery on the frame. That gallery is meant to hold
+    /// exactly one photo at a time, so whatever's already in it is deleted
+    /// first rather than left to accumulate.
+    func showRandomLocalFolderPhoto() async {
+        let folderPath = settings.randomFolderPath.trimmingCharacters(in: .whitespaces)
+        guard !folderPath.isEmpty else {
+            statusText = "Choose a folder to pick random photos from."
+            return
+        }
+        let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
+        guard let chosen = enumerateImageFiles(in: folderURL).randomElement() else {
+            statusText = "No photos found in '\(folderURL.lastPathComponent)'."
+            return
+        }
+        guard let sourceData = try? Data(contentsOf: chosen),
+              let image = NSImage(data: sourceData),
+              let jpeg = ImageCanvas.jpegData(image)
+        else {
+            statusText = "Couldn't read '\(chosen.lastPathComponent)'."
+            return
+        }
+
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+            applyDeviceInfo(info)
+
+            let gallery = "Random"
+            await client.ensureGallery(ip: settings.deviceIP, name: gallery)
+
+            let existing = try await client.fetchAllImages(ip: settings.deviceIP, gallery: gallery)
+            var deleteFailures = 0
+            for name in existing {
+                do {
+                    try await client.deleteImage(ip: settings.deviceIP, filename: name, gallery: gallery)
+                } catch {
+                    deleteFailures += 1
+                }
+            }
+
+            let filename = "\(chosen.deletingPathExtension().lastPathComponent)_\(Int(Date().timeIntervalSince1970)).jpg"
+            let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: jpeg, showNow: true)
+
+            previewImage = NSImage(data: jpeg)
+            currentImageData = jpeg
+            currentImagePath = path
+            currentGalleryOnDevice = gallery
+            let deleteWarning = deleteFailures > 0 ? " (\(deleteFailures) old photo\(deleteFailures == 1 ? "" : "s") couldn't be removed)" : ""
+            statusText = "Showed '\(chosen.lastPathComponent)' from local folder.\(deleteWarning)"
+
+            await loadGalleries()
+        } catch {
+            statusText = "Couldn't show a random local photo: \(error.localizedDescription)"
+        }
+    }
+
+    private func enumerateImageFiles(in folder: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: folder,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var files: [URL] = []
+        for case let url as URL in enumerator where Self.imageFileExtensions.contains(url.pathExtension.lowercased()) {
+            files.append(url)
+        }
+        return files
+    }
 }
