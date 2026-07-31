@@ -539,9 +539,9 @@ final class PhotoController: ObservableObject {
             statusText = "No photos found in '\(folderURL.lastPathComponent)'."
             return
         }
-        guard let sourceData = try? Data(contentsOf: chosen),
-              let image = NSImage(data: sourceData),
-              let jpeg = ImageCanvas.jpegData(image)
+        guard let cgImage = loadUprightCGImage(at: chosen),
+              let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+              let jpeg = ImageCanvas.jpegData(framed)
         else {
             statusText = "Couldn't read '\(chosen.lastPathComponent)'."
             return

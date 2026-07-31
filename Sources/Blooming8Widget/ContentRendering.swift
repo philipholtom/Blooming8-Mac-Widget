@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 
 /// Shared drawing helpers for ContentSource implementations, ported from the
 /// PIL-based rendering in the original Python scripts. Uses a top-left
@@ -146,6 +147,52 @@ func wrapTextToWidth(_ text: String, font: NSFont, maxWidth: CGFloat) -> [String
 /// within `maxHeight` — a simple "shrink/grow to fit" so a short quote
 /// renders big and fills the frame, while a long one still fits without
 /// overflowing, instead of one fixed size regardless of content length.
+/// Decodes an image file via ImageIO rather than `NSImage(data:)` +
+/// `tiffRepresentation` — the latter can wash out colors on wide-gamut/HDR
+/// sources like iPhone HEIC photos, since it doesn't reliably color-manage
+/// the embedded profile. This also bakes in any EXIF orientation
+/// (`kCGImageSourceCreateThumbnailWithTransform`) so the pixels come out
+/// upright regardless of source format.
+func loadUprightCGImage(at url: URL, maxPixelSize: Int = 2400) -> CGImage? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+    ]
+    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+}
+
+/// Fits `cgImage` into a `width`x`height` canvas preserving its aspect
+/// ratio, letterboxing with `background` — so the frame displays the whole
+/// photo instead of cropping it to fill the screen when the photo's aspect
+/// ratio doesn't match the frame's.
+func renderLetterboxed(cgImage: CGImage, width: Int, height: Int, background: NSColor) -> NSImage? {
+    ImageCanvas.render(width: width, height: height) {
+        background.setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: 0, width: width, height: height)).fill()
+
+        let imageAspect = CGFloat(cgImage.width) / CGFloat(cgImage.height)
+        let canvasAspect = CGFloat(width) / CGFloat(height)
+        let fitWidth: CGFloat
+        let fitHeight: CGFloat
+        if imageAspect > canvasAspect {
+            fitWidth = CGFloat(width)
+            fitHeight = fitWidth / imageAspect
+        } else {
+            fitHeight = CGFloat(height)
+            fitWidth = fitHeight * imageAspect
+        }
+        let rect = NSRect(
+            x: (CGFloat(width) - fitWidth) / 2,
+            y: (CGFloat(height) - fitHeight) / 2,
+            width: fitWidth,
+            height: fitHeight
+        )
+        drawImage(NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height)), in: rect)
+    }
+}
+
 func fittingFontSize(
     for text: String,
     fontName: String,
