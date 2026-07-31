@@ -67,6 +67,21 @@ final class Settings: ObservableObject {
     @Published var selectedContentSources: Set<String> {
         didSet { UserDefaults.standard.set(Array(selectedContentSources), forKey: "selectedContentSources") }
     }
+    @Published var weatherLocationName: String {
+        didSet { UserDefaults.standard.set(weatherLocationName, forKey: "weatherLocationName") }
+    }
+    @Published var weatherLatitude: Double {
+        didSet { UserDefaults.standard.set(weatherLatitude, forKey: "weatherLatitude") }
+    }
+    @Published var weatherLongitude: Double {
+        didSet { UserDefaults.standard.set(weatherLongitude, forKey: "weatherLongitude") }
+    }
+    /// The year format_history_text/create_history_art always surfaces first
+    /// if present — a personal touch from the original script (likely a
+    /// birth year), kept configurable rather than silently hardcoded.
+    @Published var historyHighlightYear: Int {
+        didSet { UserDefaults.standard.set(historyHighlightYear, forKey: "historyHighlightYear") }
+    }
 
     init() {
         deviceIP = UserDefaults.standard.string(forKey: "deviceIP") ?? ""
@@ -114,5 +129,13 @@ final class Settings: ObservableObject {
         } else {
             selectedContentSources = []
         }
+
+        weatherLocationName = UserDefaults.standard.string(forKey: "weatherLocationName") ?? "Radlett, UK"
+        weatherLatitude = UserDefaults.standard.object(forKey: "weatherLatitude") != nil
+            ? UserDefaults.standard.double(forKey: "weatherLatitude") : 51.6004
+        weatherLongitude = UserDefaults.standard.object(forKey: "weatherLongitude") != nil
+            ? UserDefaults.standard.double(forKey: "weatherLongitude") : -0.3505
+        historyHighlightYear = UserDefaults.standard.object(forKey: "historyHighlightYear") != nil
+            ? UserDefaults.standard.integer(forKey: "historyHighlightYear") : 1979
     }
 }

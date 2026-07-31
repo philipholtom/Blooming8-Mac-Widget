@@ -8,6 +8,9 @@ final class PhotoController: ObservableObject {
     private let bleWaker = BLEWaker()
 
     @Published var previewImage: NSImage?
+    /// Raw bytes behind `previewImage`, kept alongside it so "Save Photo"
+    /// can write the exact original file rather than a re-encoded copy.
+    @Published var currentImageData: Data?
     @Published var currentImagePath: String?
     @Published var deviceName: String?
     @Published var batteryPercent: Int?
@@ -308,6 +311,7 @@ final class PhotoController: ObservableObject {
 
             let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
             previewImage = NSImage(data: data)
+            currentImageData = data
             currentImagePath = path
             statusText = "Redisplayed the current photo."
         } catch {
@@ -329,6 +333,7 @@ final class PhotoController: ObservableObject {
             if let path = info.image, !path.isEmpty {
                 let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
                 previewImage = NSImage(data: data)
+                currentImageData = data
                 currentImagePath = path
             }
             statusText = "Showed next image."
@@ -402,6 +407,7 @@ final class PhotoController: ObservableObject {
             if let path = info.image, !path.isEmpty {
                 let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
                 previewImage = NSImage(data: data)
+                currentImageData = data
                 currentImagePath = path
             }
             statusText = ""
@@ -465,6 +471,7 @@ final class PhotoController: ObservableObject {
             try await client.show(ip: settings.deviceIP, imagePath: path)
             let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
             previewImage = NSImage(data: data)
+            currentImageData = data
             currentImagePath = path
             currentGalleryOnDevice = picked.gallery
             statusText = statusMessage
@@ -503,6 +510,7 @@ final class PhotoController: ObservableObject {
             )
 
             previewImage = NSImage(data: imageData)
+            currentImageData = imageData
             currentImagePath = path
             currentGalleryOnDevice = source.galleryName
             statusText = "Showed \(source.displayName)."

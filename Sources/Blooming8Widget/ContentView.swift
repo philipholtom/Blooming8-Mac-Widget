@@ -20,6 +20,11 @@ struct ContentView: View {
     @State private var manageGallery: String = ""
     @State private var newGalleryNameForUpload: String = ""
 
+    @State private var weatherLocationNameDraft: String = ""
+    @State private var weatherLatitudeDraft: String = ""
+    @State private var weatherLongitudeDraft: String = ""
+    @State private var historyHighlightYearDraft: String = ""
+
     private enum ActiveSelection: Equatable {
         case gallery(UUID?) // nil = the implicit "All" tab
         case generated
@@ -124,6 +129,10 @@ struct ContentView: View {
         maxIdleMinutesDraft = controller.maxIdleSeconds.map { String($0 / 60) } ?? ""
         sleepDurationHoursDraft = controller.sleepDurationSeconds.map { String($0 / 3600) } ?? ""
         wakeSensitivityDraft = controller.wakeSensitivity.map(String.init) ?? ""
+        weatherLocationNameDraft = settings.weatherLocationName
+        weatherLatitudeDraft = String(settings.weatherLatitude)
+        weatherLongitudeDraft = String(settings.weatherLongitude)
+        historyHighlightYearDraft = String(settings.historyHighlightYear)
     }
 
     private var header: some View {
@@ -213,6 +222,10 @@ struct ContentView: View {
 
             Divider()
 
+            generatedContentSettingsSection
+
+            Divider()
+
             HStack {
                 Button("Cancel") { showSettings = false }
                 Spacer()
@@ -221,6 +234,11 @@ struct ContentView: View {
                     settings.bleDeviceName = bleNameDraft
                     let trimmedKey = nasaApiKeyDraft.trimmingCharacters(in: .whitespaces)
                     settings.nasaApiKey = trimmedKey.isEmpty ? "DEMO_KEY" : trimmedKey
+                    let trimmedLocation = weatherLocationNameDraft.trimmingCharacters(in: .whitespaces)
+                    settings.weatherLocationName = trimmedLocation.isEmpty ? "Radlett, UK" : trimmedLocation
+                    if let lat = Double(weatherLatitudeDraft) { settings.weatherLatitude = lat }
+                    if let lon = Double(weatherLongitudeDraft) { settings.weatherLongitude = lon }
+                    if let year = Int(historyHighlightYearDraft) { settings.historyHighlightYear = year }
                     showSettings = false
                     Task {
                         await controller.refreshCurrentPhoto()
@@ -322,6 +340,36 @@ struct ContentView: View {
                     populateSettingsDrafts()
                 }
             }
+        }
+    }
+
+    // MARK: - Generated content settings (Weather location, History year)
+
+    private var generatedContentSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Generated Content Settings")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("Weather location name", text: $weatherLocationNameDraft)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                TextField("Latitude", text: $weatherLatitudeDraft)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Longitude", text: $weatherLongitudeDraft)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            HStack {
+                Text("History highlight year")
+                    .font(.caption)
+                TextField("1979", text: $historyHighlightYearDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 70)
+            }
+            Text("If today has a historical event from this year, it's always shown first.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -487,12 +535,17 @@ struct ContentView: View {
                     Button("Wake Frame") {
                         Task { await controller.wakeFrame() }
                     }
+                    Divider()
+                    Button("Save Photo...") {
+                        savePhoto()
+                    }
+                    .disabled(controller.currentImageData == nil)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("More: redisplay, show next, wake frame")
+                .help("More: redisplay, show next, wake frame, save photo")
 
                 Button {
                     Task {
@@ -547,6 +600,16 @@ struct ContentView: View {
                     Task { await controller.stopSlideshow() }
                 }
             }
+        }
+    }
+
+    private func savePhoto() {
+        guard let data = controller.currentImageData else { return }
+        let panel = NSSavePanel()
+        panel.title = "Save Photo"
+        panel.nameFieldStringValue = controller.currentImagePath.map { ($0 as NSString).lastPathComponent } ?? "photo.jpg"
+        if panel.runModal() == .OK, let url = panel.url {
+            try? data.write(to: url)
         }
     }
 

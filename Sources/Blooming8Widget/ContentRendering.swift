@@ -38,6 +38,16 @@ enum ImageCanvas {
     }
 }
 
+/// Draws `text` horizontally centered on a canvas of `canvasWidth`, at
+/// vertical position `y` (top-left origin, matching ImageCanvas's flipped
+/// context) — the recurring "centered label" pattern across content sources.
+func drawCentered(_ text: String, font: NSFont, color: NSColor, y: CGFloat, canvasWidth: Int) {
+    let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+    let nsText = text as NSString
+    let size = nsText.size(withAttributes: attrs)
+    nsText.draw(at: NSPoint(x: (CGFloat(canvasWidth) - size.width) / 2, y: y), withAttributes: attrs)
+}
+
 /// Character-count based word wrap, matching `textwrap.wrap(text, width:)`
 /// from the Python scripts (not pixel-measured, just word-boundary wrapping).
 func wrapText(_ text: String, maxCharsPerLine: Int, maxLines: Int? = nil) -> [String] {

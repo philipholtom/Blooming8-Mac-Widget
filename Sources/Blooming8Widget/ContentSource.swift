@@ -23,6 +23,18 @@ enum ContentSourceError: LocalizedError {
     }
 }
 
+/// Wikimedia's API etiquette requires a descriptive User-Agent — the
+/// original Python scripts embedded a personal name/email, which doesn't
+/// belong in a public repo, so this identifies the app instead.
+let contentSourceUserAgent = "Blooming8Widget/1.0 (+https://github.com/philipholtom/Blooming8-Mac-Widget)"
+
 enum ContentSources {
-    static let all: [ContentSource] = [APODSource(), FortuneSource()]
+    static let all: [ContentSource] = [
+        APODSource(),
+        FortuneSource(),
+        WeatherSource(),
+        MoonPhaseSource(),
+        HistorySource(),
+        PeriodicTableSource()
+    ]
 }
