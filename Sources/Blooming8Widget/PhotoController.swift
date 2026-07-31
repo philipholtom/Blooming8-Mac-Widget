@@ -124,11 +124,13 @@ final class PhotoController: ObservableObject {
         }
     }
 
-    /// Uploads local image files into a gallery, converting each to baseline
-    /// JPEG first (the frame's /upload endpoint expects JPEG; re-encoding
-    /// also smooths over exotic source formats/color profiles). Creates the
-    /// gallery if it doesn't already exist. Does not display any of them —
-    /// this is a bulk import, not a "show now" action.
+    /// Uploads local image files into a gallery, letterbox-fitting each into
+    /// the frame's 1200x1600 canvas and converting to JPEG first (the frame's
+    /// /upload endpoint expects JPEG; this also avoids the frame cropping a
+    /// mismatched aspect ratio to fill its screen, and color-manages
+    /// wide-gamut/HDR sources like HEIC correctly). Creates the gallery if it
+    /// doesn't already exist. Does not display any of them — this is a bulk
+    /// import, not a "show now" action.
     func uploadPhotos(urls: [URL], gallery: String) async {
         let trimmedGallery = gallery.trimmingCharacters(in: .whitespaces)
         guard !trimmedGallery.isEmpty else {
@@ -147,9 +149,9 @@ final class PhotoController: ObservableObject {
             var failed = 0
             for (index, url) in urls.enumerated() {
                 statusText = "Uploading \(url.lastPathComponent) (\(index + 1)/\(urls.count))..."
-                guard let data = try? Data(contentsOf: url),
-                      let image = NSImage(data: data),
-                      let jpeg = ImageCanvas.jpegData(image)
+                guard let cgImage = loadUprightCGImage(at: url),
+                      let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+                      let jpeg = ImageCanvas.jpegData(framed)
                 else {
                     failed += 1
                     continue
