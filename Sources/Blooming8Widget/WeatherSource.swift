@@ -2,8 +2,8 @@ import AppKit
 
 /// Current weather conditions, rendered entirely from scratch (no downloaded
 /// photo). Ported from weather_art_uploader.py, using Open-Meteo (free, no
-/// API key). Location defaults to the original script's coordinates but is
-/// configurable in Settings.
+/// API key). Location is configured in Settings — no default is set, so it
+/// must be entered before this source will return useful results.
 struct WeatherSource: ContentSource {
     let id = "weather"
     let displayName = "Weather"

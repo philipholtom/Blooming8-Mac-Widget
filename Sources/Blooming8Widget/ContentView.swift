@@ -230,8 +230,7 @@ struct ContentView: View {
                     settings.bleDeviceName = bleNameDraft
                     let trimmedKey = nasaApiKeyDraft.trimmingCharacters(in: .whitespaces)
                     settings.nasaApiKey = trimmedKey.isEmpty ? "DEMO_KEY" : trimmedKey
-                    let trimmedLocation = weatherLocationNameDraft.trimmingCharacters(in: .whitespaces)
-                    settings.weatherLocationName = trimmedLocation.isEmpty ? "Radlett, UK" : trimmedLocation
+                    settings.weatherLocationName = weatherLocationNameDraft.trimmingCharacters(in: .whitespaces)
                     if let lat = Double(weatherLatitudeDraft) { settings.weatherLatitude = lat }
                     if let lon = Double(weatherLongitudeDraft) { settings.weatherLongitude = lon }
                     if let year = Int(historyHighlightYearDraft) { settings.historyHighlightYear = year }

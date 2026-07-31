@@ -136,11 +136,11 @@ final class Settings: ObservableObject {
             selectedContentSources = []
         }
 
-        weatherLocationName = UserDefaults.standard.string(forKey: "weatherLocationName") ?? "Radlett, UK"
+        weatherLocationName = UserDefaults.standard.string(forKey: "weatherLocationName") ?? ""
         weatherLatitude = UserDefaults.standard.object(forKey: "weatherLatitude") != nil
-            ? UserDefaults.standard.double(forKey: "weatherLatitude") : 51.6004
+            ? UserDefaults.standard.double(forKey: "weatherLatitude") : 0
         weatherLongitude = UserDefaults.standard.object(forKey: "weatherLongitude") != nil
-            ? UserDefaults.standard.double(forKey: "weatherLongitude") : -0.3505
+            ? UserDefaults.standard.double(forKey: "weatherLongitude") : 0
         historyHighlightYear = UserDefaults.standard.object(forKey: "historyHighlightYear") != nil
             ? UserDefaults.standard.integer(forKey: "historyHighlightYear") : 1979
         randomFolderPath = UserDefaults.standard.string(forKey: "randomFolderPath") ?? ""
