@@ -133,32 +133,64 @@ struct FortuneSource: ContentSource {
     private func renderArt(quote: String) -> NSImage? {
         let scheme = Self.colorSchemes.randomElement()!
 
+        // Pick the largest font that fits the available width/height, then
+        // lay out the whole border+text+date block and center *that block*
+        // vertically on the canvas — rather than anchoring the top border and
+        // date at fixed positions, which left a large dead zone between the
+        // bottom border and the date whenever a short quote didn't need the
+        // full height. Centering the block means a short quote's extra space
+        // gets distributed evenly above and below instead of dumped at the
+        // bottom, so the design reads as filling the frame either way.
+        let sideMargin: CGFloat = 100
+        let maxTextWidth = CGFloat(width) - 2 * sideMargin
+        let borderToTextGap: CGFloat = 60
+        let textToBorderGap: CGFloat = 40
+        let borderToDateGap: CGFloat = 60
+        let dateFont = NSFont(name: "Helvetica", size: 20) ?? NSFont.systemFont(ofSize: 20)
+        let dateHeight = dateFont.pointSize
+        let minTopMargin: CGFloat = 100
+        let bottomSafety: CGFloat = 60
+
+        let maxTextHeight = CGFloat(height) - 2 * minTopMargin - borderToTextGap - textToBorderGap - borderToDateGap - dateHeight - bottomSafety
+
+        let fitted = fittingFontSize(
+            for: quote,
+            fontName: "Helvetica",
+            range: 28...220,
+            maxWidth: maxTextWidth,
+            maxHeight: maxTextHeight
+        )
+
+        let textHeight = CGFloat(fitted.lines.count) * fitted.lineHeight
+        let blockHeight = borderToTextGap + textHeight + textToBorderGap + borderToDateGap + dateHeight
+        let topBorderY = max(minTopMargin, (CGFloat(height) - blockHeight) / 2)
+
         return ImageCanvas.render(width: width, height: height) {
             scheme.background.setFill()
             NSBezierPath(rect: NSRect(x: 0, y: 0, width: self.width, height: self.height)).fill()
 
-            let border = NSBezierPath()
-            border.lineWidth = 2
+            let topBorder = NSBezierPath()
+            topBorder.lineWidth = 2
             for i in 0..<3 {
-                border.move(to: NSPoint(x: 50, y: 100 + CGFloat(i)))
-                border.line(to: NSPoint(x: CGFloat(self.width) - 50, y: 100 + CGFloat(i)))
+                topBorder.move(to: NSPoint(x: 50, y: topBorderY + CGFloat(i)))
+                topBorder.line(to: NSPoint(x: CGFloat(self.width) - 50, y: topBorderY + CGFloat(i)))
             }
             scheme.accent.setStroke()
-            border.stroke()
+            topBorder.stroke()
 
-            let quoteFont = NSFont(name: "Helvetica", size: 36) ?? NSFont.systemFont(ofSize: 36)
-            let wrapped = wrapText(quote, maxCharsPerLine: 50)
-            let lineHeight: CGFloat = 50
-            let totalTextHeight = CGFloat(wrapped.count) * lineHeight
-            var currentY = (CGFloat(self.height) - totalTextHeight) / 2 - 100
-            for line in wrapped {
-                drawCentered(line, font: quoteFont, color: scheme.text, y: currentY, canvasWidth: self.width)
-                currentY += lineHeight
+            // drawCentered's `y` lands at the *bottom* of each line's glyphs
+            // (they extend upward from it), so the first line's y needs to
+            // start a full line height below the border gap, not right at it
+            // — otherwise a large font's ascenders reach up past the border.
+            var currentY = topBorderY + borderToTextGap + fitted.lineHeight
+            for line in fitted.lines {
+                drawCentered(line, font: fitted.font, color: scheme.text, y: currentY, canvasWidth: self.width)
+                currentY += fitted.lineHeight
             }
 
             let bottomBorder = NSBezierPath()
             bottomBorder.lineWidth = 2
-            let bottomLineY = currentY + 100
+            let bottomLineY = topBorderY + borderToTextGap + textHeight + textToBorderGap
             for i in 0..<3 {
                 bottomBorder.move(to: NSPoint(x: 50, y: bottomLineY + CGFloat(i)))
                 bottomBorder.line(to: NSPoint(x: CGFloat(self.width) - 50, y: bottomLineY + CGFloat(i)))
@@ -166,10 +198,9 @@ struct FortuneSource: ContentSource {
             scheme.accent.setStroke()
             bottomBorder.stroke()
 
-            let authorFont = NSFont(name: "Helvetica", size: 20) ?? NSFont.systemFont(ofSize: 20)
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "MMMM d, yyyy"
-            drawCentered(dateFormatter.string(from: Date()), font: authorFont, color: scheme.accent, y: CGFloat(self.height) - 80, canvasWidth: self.width)
+            drawCentered(dateFormatter.string(from: Date()), font: dateFont, color: scheme.accent, y: bottomLineY + borderToDateGap, canvasWidth: self.width)
         }
     }
 }

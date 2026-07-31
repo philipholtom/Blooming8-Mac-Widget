@@ -117,3 +117,57 @@ func wrapText(_ text: String, maxCharsPerLine: Int, maxLines: Int? = nil) -> [St
     }
     return lines
 }
+
+/// Word-wraps `text` to fit within `maxWidth` points at `font`, measuring
+/// each candidate line's actual rendered width rather than approximating by
+/// character count — needed when the font size itself varies (see
+/// `fittingFontSize` below), since a fixed character count doesn't
+/// correspond to a fixed pixel width across different sizes.
+func wrapTextToWidth(_ text: String, font: NSFont, maxWidth: CGFloat) -> [String] {
+    let attrs: [NSAttributedString.Key: Any] = [.font: font]
+    var lines: [String] = []
+    var currentLine = ""
+    for word in text.split(whereSeparator: { $0.isWhitespace }) {
+        let candidate = currentLine.isEmpty ? String(word) : currentLine + " " + word
+        let width = (candidate as NSString).size(withAttributes: attrs).width
+        if width > maxWidth, !currentLine.isEmpty {
+            lines.append(currentLine)
+            currentLine = String(word)
+        } else {
+            currentLine = candidate
+        }
+    }
+    if !currentLine.isEmpty { lines.append(currentLine) }
+    return lines
+}
+
+/// Picks the largest font size in `range` (falling back to the smallest if
+/// even that overflows) such that `text`, wrapped to `maxWidth`, fits
+/// within `maxHeight` — a simple "shrink/grow to fit" so a short quote
+/// renders big and fills the frame, while a long one still fits without
+/// overflowing, instead of one fixed size regardless of content length.
+func fittingFontSize(
+    for text: String,
+    fontName: String,
+    range: ClosedRange<CGFloat>,
+    maxWidth: CGFloat,
+    maxHeight: CGFloat,
+    lineHeightMultiplier: CGFloat = 1.3,
+    step: CGFloat = 2
+) -> (font: NSFont, lines: [String], lineHeight: CGFloat) {
+    func attempt(_ size: CGFloat) -> (font: NSFont, lines: [String], lineHeight: CGFloat) {
+        let font = NSFont(name: fontName, size: size) ?? NSFont.systemFont(ofSize: size)
+        let lines = wrapTextToWidth(text, font: font, maxWidth: maxWidth)
+        return (font, lines, size * lineHeightMultiplier)
+    }
+
+    var size = range.upperBound
+    while size > range.lowerBound {
+        let candidate = attempt(size)
+        if CGFloat(candidate.lines.count) * candidate.lineHeight <= maxHeight {
+            return candidate
+        }
+        size -= step
+    }
+    return attempt(range.lowerBound)
+}
