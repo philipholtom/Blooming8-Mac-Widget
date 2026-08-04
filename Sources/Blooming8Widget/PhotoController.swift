@@ -23,6 +23,11 @@ final class PhotoController: ObservableObject {
     @Published var isBusy: Bool = false
     /// Tabs unlocked this app session (in-memory only — re-locks on relaunch).
     @Published var unlockedTabIDs: Set<UUID> = []
+    /// Whether locked tabs are currently shown in the tab bar at all — off by
+    /// default so they don't appear to a casual viewer of the popover, toggled
+    /// with a keyboard shortcut, and reset to hidden whenever the popover
+    /// closes so it doesn't stay revealed for the next person who opens it.
+    @Published var showHiddenTabs: Bool = false
     /// When the next automatic random photo is scheduled to fire, if enabled.
     @Published var nextAutoRandomFireDate: Date?
     /// Whether the frame answered the last reachability check — nil means no
