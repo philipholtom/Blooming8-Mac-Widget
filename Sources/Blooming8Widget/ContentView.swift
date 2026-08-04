@@ -15,7 +15,7 @@ struct ContentView: View {
     @State private var wakeSensitivityDraft: String = ""
 
     @State private var slideshowGallery: String = ""
-    @State private var slideshowDurationDraft: String = "300"
+    @State private var slideshowDurationDraft: String = "5"
 
     @State private var manageGallery: String = ""
     @State private var newGalleryNameForUpload: String = ""
@@ -577,17 +577,17 @@ struct ContentView: View {
                     }
                 }
                 .labelsHidden()
-                TextField("sec", text: $slideshowDurationDraft)
+                TextField("min", text: $slideshowDurationDraft)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 50)
-                Text("sec")
+                Text("min")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
                 Button("Start") {
-                    let duration = Int(slideshowDurationDraft) ?? 300
-                    Task { await controller.startSlideshow(gallery: slideshowGallery, durationSeconds: duration) }
+                    let minutes = Int(slideshowDurationDraft) ?? 5
+                    Task { await controller.startSlideshow(gallery: slideshowGallery, durationSeconds: minutes * 60) }
                 }
                 .disabled(slideshowGallery.isEmpty)
                 Button("Stop") {

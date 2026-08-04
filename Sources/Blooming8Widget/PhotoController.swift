@@ -357,7 +357,7 @@ final class PhotoController: ObservableObject {
                 try await client.startSlideshow(ip: settings.deviceIP, gallery: gallery, durationSeconds: durationSeconds)
             }
             currentGalleryOnDevice = gallery
-            statusText = "Started slideshow of '\(gallery)' every \(durationSeconds)s."
+            statusText = "Started slideshow of '\(gallery)' every \(durationSeconds / 60) min."
         } catch {
             statusText = "Couldn't start slideshow: \(error.localizedDescription)"
         }
