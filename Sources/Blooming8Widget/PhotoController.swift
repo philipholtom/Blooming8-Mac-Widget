@@ -25,9 +25,14 @@ final class PhotoController: ObservableObject {
     @Published var unlockedTabIDs: Set<UUID> = []
     /// When the next automatic random photo is scheduled to fire, if enabled.
     @Published var nextAutoRandomFireDate: Date?
+    /// Whether the frame answered the last reachability check — nil means no
+    /// device IP is set yet, or the first check hasn't completed.
+    @Published var isDeviceAwake: Bool?
 
     private var autoRandomTimer: Timer?
     private var autoRandomCancellable: AnyCancellable?
+    private var statusPollTimer: Timer?
+    private var statusPollCancellable: AnyCancellable?
 
     init(settings: Settings) {
         self.settings = settings
@@ -42,6 +47,42 @@ final class PhotoController: ObservableObject {
         )
         .sink { [weak self] _, _, _, _ in
             self?.updateAutoRandomSchedule()
+        }
+
+        statusPollCancellable = settings.$deviceIP
+            .sink { [weak self] _ in
+                self?.updateStatusPollSchedule()
+            }
+    }
+
+    /// (Re)starts the periodic awake/asleep check to match the current
+    /// device IP. Always cancels any pending timer first.
+    private func updateStatusPollSchedule() {
+        statusPollTimer?.invalidate()
+        statusPollTimer = nil
+        guard !settings.deviceIP.isEmpty else {
+            isDeviceAwake = nil
+            return
+        }
+        Task { await pollDeviceStatus() }
+        statusPollTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.pollDeviceStatus()
+            }
+        }
+    }
+
+    /// A lightweight reachability check for the menu bar/popover status
+    /// indicator. Deliberately does not go through withWakeRetry's BLE wake
+    /// pulse — the whole point is to notice the frame is asleep, not to wake
+    /// it up just to check.
+    private func pollDeviceStatus() async {
+        guard !settings.deviceIP.isEmpty else { return }
+        do {
+            let info = try await client.fetchDeviceInfo(ip: settings.deviceIP)
+            applyDeviceInfo(info)
+        } catch {
+            isDeviceAwake = false
         }
     }
 
@@ -157,7 +198,7 @@ final class PhotoController: ObservableObject {
                     continue
                 }
                 let baseName = url.deletingPathExtension().lastPathComponent
-                let filename = "\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(index).jpg"
+                let filename = portraitFilename("\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(index)")
                 do {
                     _ = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: trimmedGallery, imageData: jpeg, showNow: false)
                     uploaded += 1
@@ -265,6 +306,7 @@ final class PhotoController: ObservableObject {
         sleepDurationSeconds = info.sleepDuration
         maxIdleSeconds = info.maxIdle
         wakeSensitivity = info.idxWakeSens
+        isDeviceAwake = true
     }
 
     private func isConnectivityError(_ error: Error) -> Bool {
@@ -357,7 +399,7 @@ final class PhotoController: ObservableObject {
                 try await client.startSlideshow(ip: settings.deviceIP, gallery: gallery, durationSeconds: durationSeconds)
             }
             currentGalleryOnDevice = gallery
-            statusText = "Started slideshow of '\(gallery)' every \(durationSeconds)s."
+            statusText = "Started slideshow of '\(gallery)' every \(durationSeconds / 60) min."
         } catch {
             statusText = "Couldn't start slideshow: \(error.localizedDescription)"
         }
@@ -502,7 +544,7 @@ final class PhotoController: ObservableObject {
             let imageData = try await source.generateImage(settings: settings)
 
             await client.ensureGallery(ip: settings.deviceIP, name: source.galleryName)
-            let filename = "\(source.id)_\(Int(Date().timeIntervalSince1970)).jpg"
+            let filename = portraitFilename("\(source.id)_\(Int(Date().timeIntervalSince1970))")
             let path = try await client.uploadImage(
                 ip: settings.deviceIP,
                 filename: filename,
@@ -526,11 +568,46 @@ final class PhotoController: ObservableObject {
 
     private static let imageFileExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "gif", "bmp", "tiff", "tif", "webp"]
 
-    /// Picks a random image from the local folder in Settings and uploads it
-    /// to a "Random" gallery on the frame. That gallery is meant to hold
-    /// exactly one photo at a time, so whatever's already in it is deleted
-    /// first rather than left to accumulate.
-    func showRandomLocalFolderPhoto() async {
+    /// The frame's firmware requires uploaded filenames to end with `_P.jpg`
+    /// (portrait) or `_L.jpg` (landscape — the device rotates the stored
+    /// pixels 90° at display time); a missing suffix corrupts the display
+    /// (see Schedule_Pull_API.md §5.3). Every image this app uploads is
+    /// always rendered onto a portrait canvas already (1200x1600, or via
+    /// renderLetterboxed), so this always appends `_P`.
+    private func portraitFilename(_ base: String) -> String {
+        "\(base)_P.jpg"
+    }
+
+    private static let maxUploadFilenameLength = 12
+
+    /// Strips everything but ASCII letters/digits and truncates, leaving
+    /// room for the required "_P.jpg" suffix so the whole filename stays
+    /// close to the old 8.3 short-name length — folder photos can have
+    /// long names with spaces, punctuation, or unicode that the frame's
+    /// firmware may not handle well.
+    private func sanitizedShortBase(_ raw: String) -> String {
+        let maxBaseLength = max(1, Self.maxUploadFilenameLength - "_P.jpg".count)
+        let filtered = raw.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        let truncated = String(filtered.prefix(maxBaseLength))
+        return truncated.isEmpty ? "img" : truncated
+    }
+
+    struct LocalFolderCandidate {
+        let fileURL: URL
+        let image: NSImage
+        let jpegData: Data
+    }
+
+    /// A randomly-picked, rendered photo awaiting the user's approval — set
+    /// by `prepareLocalFolderCandidate()`, and only actually uploaded once
+    /// `confirmLocalFolderCandidate()` is called, so nothing reaches the
+    /// frame until the user has seen and approved it.
+    @Published var localFolderCandidate: LocalFolderCandidate?
+
+    /// Picks a random image from the local folder in Settings and renders it
+    /// for preview, replacing any candidate already awaiting approval (used
+    /// for both the initial pick and "Next").
+    func prepareLocalFolderCandidate() {
         let folderPath = settings.randomFolderPath.trimmingCharacters(in: .whitespaces)
         guard !folderPath.isEmpty else {
             statusText = "Choose a folder to pick random photos from."
@@ -548,7 +625,21 @@ final class PhotoController: ObservableObject {
             statusText = "Couldn't read '\(chosen.lastPathComponent)'."
             return
         }
+        localFolderCandidate = LocalFolderCandidate(fileURL: chosen, image: framed, jpegData: jpeg)
+        statusText = ""
+    }
 
+    /// Discards the pending candidate without uploading anything.
+    func cancelLocalFolderCandidate() {
+        localFolderCandidate = nil
+    }
+
+    /// Uploads the approved candidate to the frame's "Random" gallery and
+    /// displays it immediately. That gallery is meant to hold exactly one
+    /// photo at a time, so whatever's already in it is deleted first rather
+    /// than left to accumulate.
+    func confirmLocalFolderCandidate() async {
+        guard let candidate = localFolderCandidate else { return }
         isBusy = true
         defer { isBusy = false }
         do {
@@ -568,15 +659,17 @@ final class PhotoController: ObservableObject {
                 }
             }
 
-            let filename = "\(chosen.deletingPathExtension().lastPathComponent)_\(Int(Date().timeIntervalSince1970)).jpg"
-            let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: jpeg, showNow: true)
+            let sourceBase = candidate.fileURL.deletingPathExtension().lastPathComponent
+            let filename = portraitFilename(sanitizedShortBase(sourceBase))
+            let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: candidate.jpegData, showNow: true)
 
-            previewImage = NSImage(data: jpeg)
-            currentImageData = jpeg
+            previewImage = candidate.image
+            currentImageData = candidate.jpegData
             currentImagePath = path
             currentGalleryOnDevice = gallery
             let deleteWarning = deleteFailures > 0 ? " (\(deleteFailures) old photo\(deleteFailures == 1 ? "" : "s") couldn't be removed)" : ""
-            statusText = "Showed '\(chosen.lastPathComponent)' from local folder.\(deleteWarning)"
+            statusText = "Showed '\(candidate.fileURL.lastPathComponent)' from local folder.\(deleteWarning)"
+            localFolderCandidate = nil
 
             await loadGalleries()
         } catch {

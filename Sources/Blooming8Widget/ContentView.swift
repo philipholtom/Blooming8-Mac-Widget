@@ -15,7 +15,7 @@ struct ContentView: View {
     @State private var wakeSensitivityDraft: String = ""
 
     @State private var slideshowGallery: String = ""
-    @State private var slideshowDurationDraft: String = "300"
+    @State private var slideshowDurationDraft: String = "5"
 
     @State private var manageGallery: String = ""
     @State private var newGalleryNameForUpload: String = ""
@@ -45,7 +45,7 @@ struct ContentView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(Color.gray.opacity(0.15))
-                if let previewImage = controller.previewImage {
+                if let previewImage = controller.localFolderCandidate?.image ?? controller.previewImage {
                     Image(nsImage: previewImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -58,7 +58,13 @@ struct ContentView: View {
             }
             .frame(height: 220)
 
-            if let currentImagePath = controller.currentImagePath {
+            if let candidate = controller.localFolderCandidate {
+                Text("Preview — \(candidate.fileURL.lastPathComponent)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else if let currentImagePath = controller.currentImagePath {
                 Text(currentImagePath)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -80,7 +86,9 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if showSettings {
+            if controller.localFolderCandidate != nil {
+                localFolderPreviewControls
+            } else if showSettings {
                 settingsForm
             } else {
                 controls
@@ -140,6 +148,9 @@ struct ContentView: View {
             Text("Blooming8")
                 .font(.headline)
             Spacer()
+            if let isAwake = controller.isDeviceAwake {
+                awakeIndicator(isAwake: isAwake)
+            }
             if let battery = controller.batteryPercent {
                 batteryIndicator(percent: battery)
             }
@@ -153,6 +164,17 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    private func awakeIndicator(isAwake: Bool) -> some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(isAwake ? Color.green : Color.secondary)
+                .frame(width: 6, height: 6)
+            Text(isAwake ? "Awake" : "Asleep")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
     private func batteryIndicator(percent: Int) -> some View {
@@ -539,7 +561,7 @@ struct ContentView: View {
                         case .generated:
                             await controller.showRandomGeneratedContent()
                         case .localFolder:
-                            await controller.showRandomLocalFolderPhoto()
+                            controller.prepareLocalFolderCandidate()
                         }
                     }
                 } label: {
@@ -569,17 +591,17 @@ struct ContentView: View {
                     }
                 }
                 .labelsHidden()
-                TextField("sec", text: $slideshowDurationDraft)
+                TextField("min", text: $slideshowDurationDraft)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 50)
-                Text("sec")
+                Text("min")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
                 Button("Start") {
-                    let duration = Int(slideshowDurationDraft) ?? 300
-                    Task { await controller.startSlideshow(gallery: slideshowGallery, durationSeconds: duration) }
+                    let minutes = Int(slideshowDurationDraft) ?? 5
+                    Task { await controller.startSlideshow(gallery: slideshowGallery, durationSeconds: minutes * 60) }
                 }
                 .disabled(slideshowGallery.isEmpty)
                 Button("Stop") {
@@ -587,6 +609,34 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Local folder preview (approve/skip/cancel before anything is sent)
+
+    private var localFolderPreviewControls: some View {
+        VStack(spacing: 8) {
+            Text("Not sent to the frame yet.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button("Cancel") {
+                    controller.cancelLocalFolderCandidate()
+                }
+                .frame(maxWidth: .infinity)
+
+                Button("Next") {
+                    controller.prepareLocalFolderCandidate()
+                }
+                .frame(maxWidth: .infinity)
+
+                Button("Send") {
+                    Task { await controller.confirmLocalFolderCandidate() }
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .disabled(controller.isBusy)
     }
 
     private func savePhoto() {
@@ -726,6 +776,7 @@ struct ContentView: View {
             activeSelection = selection
             unlockPasswordDraft = ""
             unlockError = false
+            controller.cancelLocalFolderCandidate()
         } label: {
             HStack(spacing: 4) {
                 if isLocked {

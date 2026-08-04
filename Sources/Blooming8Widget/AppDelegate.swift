@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -8,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settings = Settings()
     private lazy var controller = PhotoController(settings: settings)
     private var activityToken: NSObjectProtocol?
+    private var awakeStatusCancellable: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -22,12 +24,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "photo.on.rectangle.angled", accessibilityDescription: "Blooming8")
             button.action = #selector(statusItemClicked(_:))
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         self.statusItem = statusItem
+        updateStatusIcon(isAwake: nil)
+
+        // The icon can't observe @Published properties on its own like a
+        // SwiftUI view would, so mirror isDeviceAwake into it manually.
+        awakeStatusCancellable = controller.$isDeviceAwake
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isAwake in
+                self?.updateStatusIcon(isAwake: isAwake)
+            }
 
         let hostingController = NSHostingController(rootView: ContentView(settings: settings, controller: controller))
         // Let the popover grow/shrink to fit however many galleries are listed,
@@ -38,6 +48,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.contentViewController = hostingController
         self.popover = popover
+    }
+
+    /// Sets the menu bar icon's shape/color to reflect whether the frame is
+    /// currently reachable: green when awake, a dimmed "sleeping" icon when
+    /// it isn't (asleep is a normal battery-saving state for this device,
+    /// not an error, hence gray/blue rather than red), or the plain
+    /// template icon when there's nothing to report yet.
+    private func updateStatusIcon(isAwake: Bool?) {
+        guard let button = statusItem?.button else { return }
+        switch isAwake {
+        case .some(true):
+            let config = NSImage.SymbolConfiguration(paletteColors: [.systemGreen])
+            let image = NSImage(systemSymbolName: "photo.on.rectangle.angled", accessibilityDescription: "Blooming8 (frame awake)")?
+                .withSymbolConfiguration(config)
+            image?.isTemplate = false
+            button.image = image
+        case .some(false):
+            let config = NSImage.SymbolConfiguration(paletteColors: [.secondaryLabelColor])
+            let image = NSImage(systemSymbolName: "moon.zzz.fill", accessibilityDescription: "Blooming8 (frame asleep)")?
+                .withSymbolConfiguration(config)
+            image?.isTemplate = false
+            button.image = image
+        case .none:
+            let image = NSImage(systemSymbolName: "photo.on.rectangle.angled", accessibilityDescription: "Blooming8")
+            image?.isTemplate = true
+            button.image = image
+        }
     }
 
     @objc private func statusItemClicked(_ sender: Any?) {
