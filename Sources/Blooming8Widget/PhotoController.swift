@@ -25,9 +25,14 @@ final class PhotoController: ObservableObject {
     @Published var unlockedTabIDs: Set<UUID> = []
     /// When the next automatic random photo is scheduled to fire, if enabled.
     @Published var nextAutoRandomFireDate: Date?
+    /// Whether the frame answered the last reachability check — nil means no
+    /// device IP is set yet, or the first check hasn't completed.
+    @Published var isDeviceAwake: Bool?
 
     private var autoRandomTimer: Timer?
     private var autoRandomCancellable: AnyCancellable?
+    private var statusPollTimer: Timer?
+    private var statusPollCancellable: AnyCancellable?
 
     init(settings: Settings) {
         self.settings = settings
@@ -42,6 +47,42 @@ final class PhotoController: ObservableObject {
         )
         .sink { [weak self] _, _, _, _ in
             self?.updateAutoRandomSchedule()
+        }
+
+        statusPollCancellable = settings.$deviceIP
+            .sink { [weak self] _ in
+                self?.updateStatusPollSchedule()
+            }
+    }
+
+    /// (Re)starts the periodic awake/asleep check to match the current
+    /// device IP. Always cancels any pending timer first.
+    private func updateStatusPollSchedule() {
+        statusPollTimer?.invalidate()
+        statusPollTimer = nil
+        guard !settings.deviceIP.isEmpty else {
+            isDeviceAwake = nil
+            return
+        }
+        Task { await pollDeviceStatus() }
+        statusPollTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.pollDeviceStatus()
+            }
+        }
+    }
+
+    /// A lightweight reachability check for the menu bar/popover status
+    /// indicator. Deliberately does not go through withWakeRetry's BLE wake
+    /// pulse — the whole point is to notice the frame is asleep, not to wake
+    /// it up just to check.
+    private func pollDeviceStatus() async {
+        guard !settings.deviceIP.isEmpty else { return }
+        do {
+            let info = try await client.fetchDeviceInfo(ip: settings.deviceIP)
+            applyDeviceInfo(info)
+        } catch {
+            isDeviceAwake = false
         }
     }
 
@@ -265,6 +306,7 @@ final class PhotoController: ObservableObject {
         sleepDurationSeconds = info.sleepDuration
         maxIdleSeconds = info.maxIdle
         wakeSensitivity = info.idxWakeSens
+        isDeviceAwake = true
     }
 
     private func isConnectivityError(_ error: Error) -> Bool {

@@ -148,6 +148,9 @@ struct ContentView: View {
             Text("Blooming8")
                 .font(.headline)
             Spacer()
+            if let isAwake = controller.isDeviceAwake {
+                awakeIndicator(isAwake: isAwake)
+            }
             if let battery = controller.batteryPercent {
                 batteryIndicator(percent: battery)
             }
@@ -161,6 +164,17 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    private func awakeIndicator(isAwake: Bool) -> some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(isAwake ? Color.green : Color.secondary)
+                .frame(width: 6, height: 6)
+            Text(isAwake ? "Awake" : "Asleep")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
     private func batteryIndicator(percent: Int) -> some View {
