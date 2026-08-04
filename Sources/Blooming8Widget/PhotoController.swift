@@ -157,7 +157,7 @@ final class PhotoController: ObservableObject {
                     continue
                 }
                 let baseName = url.deletingPathExtension().lastPathComponent
-                let filename = "\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(index).jpg"
+                let filename = portraitFilename("\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(index)")
                 do {
                     _ = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: trimmedGallery, imageData: jpeg, showNow: false)
                     uploaded += 1
@@ -502,7 +502,7 @@ final class PhotoController: ObservableObject {
             let imageData = try await source.generateImage(settings: settings)
 
             await client.ensureGallery(ip: settings.deviceIP, name: source.galleryName)
-            let filename = "\(source.id)_\(Int(Date().timeIntervalSince1970)).jpg"
+            let filename = portraitFilename("\(source.id)_\(Int(Date().timeIntervalSince1970))")
             let path = try await client.uploadImage(
                 ip: settings.deviceIP,
                 filename: filename,
@@ -525,6 +525,16 @@ final class PhotoController: ObservableObject {
     }
 
     private static let imageFileExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "gif", "bmp", "tiff", "tif", "webp"]
+
+    /// The frame's firmware requires uploaded filenames to end with `_P.jpg`
+    /// (portrait) or `_L.jpg` (landscape — the device rotates the stored
+    /// pixels 90° at display time); a missing suffix corrupts the display
+    /// (see Schedule_Pull_API.md §5.3). Every image this app uploads is
+    /// always rendered onto a portrait canvas already (1200x1600, or via
+    /// renderLetterboxed), so this always appends `_P`.
+    private func portraitFilename(_ base: String) -> String {
+        "\(base)_P.jpg"
+    }
 
     struct LocalFolderCandidate {
         let fileURL: URL
@@ -593,7 +603,7 @@ final class PhotoController: ObservableObject {
                 }
             }
 
-            let filename = "\(candidate.fileURL.deletingPathExtension().lastPathComponent)_\(Int(Date().timeIntervalSince1970)).jpg"
+            let filename = portraitFilename("\(candidate.fileURL.deletingPathExtension().lastPathComponent)_\(Int(Date().timeIntervalSince1970))")
             let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: candidate.jpegData, showNow: true)
 
             previewImage = candidate.image
