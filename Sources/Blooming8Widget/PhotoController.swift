@@ -603,7 +603,11 @@ final class PhotoController: ObservableObject {
                 }
             }
 
-            let filename = portraitFilename("\(candidate.fileURL.deletingPathExtension().lastPathComponent)_\(Int(Date().timeIntervalSince1970))")
+            // Fixed name rather than one derived from the source file/timestamp —
+            // this gallery only ever holds one photo at a time anyway, and a
+            // short, constant filename rules out any issue from long/unusual
+            // source filenames reaching the frame.
+            let filename = portraitFilename("random")
             let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: candidate.jpegData, showNow: true)
 
             previewImage = candidate.image
