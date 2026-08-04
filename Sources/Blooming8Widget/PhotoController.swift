@@ -526,11 +526,22 @@ final class PhotoController: ObservableObject {
 
     private static let imageFileExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "gif", "bmp", "tiff", "tif", "webp"]
 
-    /// Picks a random image from the local folder in Settings and uploads it
-    /// to a "Random" gallery on the frame. That gallery is meant to hold
-    /// exactly one photo at a time, so whatever's already in it is deleted
-    /// first rather than left to accumulate.
-    func showRandomLocalFolderPhoto() async {
+    struct LocalFolderCandidate {
+        let fileURL: URL
+        let image: NSImage
+        let jpegData: Data
+    }
+
+    /// A randomly-picked, rendered photo awaiting the user's approval — set
+    /// by `prepareLocalFolderCandidate()`, and only actually uploaded once
+    /// `confirmLocalFolderCandidate()` is called, so nothing reaches the
+    /// frame until the user has seen and approved it.
+    @Published var localFolderCandidate: LocalFolderCandidate?
+
+    /// Picks a random image from the local folder in Settings and renders it
+    /// for preview, replacing any candidate already awaiting approval (used
+    /// for both the initial pick and "Next").
+    func prepareLocalFolderCandidate() {
         let folderPath = settings.randomFolderPath.trimmingCharacters(in: .whitespaces)
         guard !folderPath.isEmpty else {
             statusText = "Choose a folder to pick random photos from."
@@ -548,7 +559,21 @@ final class PhotoController: ObservableObject {
             statusText = "Couldn't read '\(chosen.lastPathComponent)'."
             return
         }
+        localFolderCandidate = LocalFolderCandidate(fileURL: chosen, image: framed, jpegData: jpeg)
+        statusText = ""
+    }
 
+    /// Discards the pending candidate without uploading anything.
+    func cancelLocalFolderCandidate() {
+        localFolderCandidate = nil
+    }
+
+    /// Uploads the approved candidate to the frame's "Random" gallery and
+    /// displays it immediately. That gallery is meant to hold exactly one
+    /// photo at a time, so whatever's already in it is deleted first rather
+    /// than left to accumulate.
+    func confirmLocalFolderCandidate() async {
+        guard let candidate = localFolderCandidate else { return }
         isBusy = true
         defer { isBusy = false }
         do {
@@ -568,15 +593,16 @@ final class PhotoController: ObservableObject {
                 }
             }
 
-            let filename = "\(chosen.deletingPathExtension().lastPathComponent)_\(Int(Date().timeIntervalSince1970)).jpg"
-            let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: jpeg, showNow: true)
+            let filename = "\(candidate.fileURL.deletingPathExtension().lastPathComponent)_\(Int(Date().timeIntervalSince1970)).jpg"
+            let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: candidate.jpegData, showNow: true)
 
-            previewImage = NSImage(data: jpeg)
-            currentImageData = jpeg
+            previewImage = candidate.image
+            currentImageData = candidate.jpegData
             currentImagePath = path
             currentGalleryOnDevice = gallery
             let deleteWarning = deleteFailures > 0 ? " (\(deleteFailures) old photo\(deleteFailures == 1 ? "" : "s") couldn't be removed)" : ""
-            statusText = "Showed '\(chosen.lastPathComponent)' from local folder.\(deleteWarning)"
+            statusText = "Showed '\(candidate.fileURL.lastPathComponent)' from local folder.\(deleteWarning)"
+            localFolderCandidate = nil
 
             await loadGalleries()
         } catch {
