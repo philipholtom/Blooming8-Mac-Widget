@@ -682,6 +682,20 @@ final class PhotoController: ObservableObject {
 
             let sourceBase = candidate.fileURL.deletingPathExtension().lastPathComponent
             let filename = portraitFilename(sanitizedShortBase(sourceBase))
+
+            // If any deletes failed, try to delete just the file we're about to
+            // upload as a safety pass — this prevents the frame from having the
+            // old photo if the initial delete_all sweep didn't work.
+            if deleteFailures > 0 {
+                do {
+                    statusText = "→ POST /image/delete?image=\(filename)&gallery=\(gallery) (safety pass)"
+                    try await client.deleteImage(ip: settings.deviceIP, filename: filename, gallery: gallery)
+                    statusText = "← /image/delete OK (cleared conflict)"
+                } catch {
+                    statusText = "← /image/delete failed: \(error.localizedDescription)"
+                }
+            }
+
             statusText = "→ POST /upload?filename=\(filename)&gallery=\(gallery)&show_now=1\n📦 \(Int(candidate.jpegData.count / 1024))KB"
             let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: candidate.jpegData, showNow: true)
 
