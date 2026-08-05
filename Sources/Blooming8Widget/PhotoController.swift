@@ -334,8 +334,10 @@ final class PhotoController: ObservableObject {
         isBusy = true
         defer { isBusy = false }
         do {
+            statusText = "→ GET /deviceInfo"
             let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
             applyDeviceInfo(info)
+            statusText = "← /deviceInfo OK"
             guard let path = info.image, !path.isEmpty else {
                 statusText = "No current photo to redisplay."
                 return
@@ -345,26 +347,30 @@ final class PhotoController: ObservableObject {
             var lastError: Error?
             for attempt in 1...maxAttempts {
                 do {
+                    statusText = "→ POST /show?image=\(path)"
                     try await client.show(ip: settings.deviceIP, imagePath: path)
+                    statusText = "← /show OK"
                     lastError = nil
                     break
                 } catch {
                     lastError = error
                     if attempt < maxAttempts {
-                        statusText = "Frame busy, retrying (\(attempt)/\(maxAttempts))..."
+                        statusText = "← /show BUSY, retrying (\(attempt)/\(maxAttempts))..."
                         try? await Task.sleep(nanoseconds: 2_000_000_000)
                     }
                 }
             }
             if let lastError { throw lastError }
 
+            statusText = "→ GET \(path)"
             let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
+            statusText = "← image OK (\(Int(data.count / 1024))KB)"
             previewImage = NSImage(data: data)
             currentImageData = data
             currentImagePath = path
-            statusText = "Redisplayed the current photo."
+            statusText = "✓ Redisplayed"
         } catch {
-            statusText = "Couldn't redisplay photo: \(error.localizedDescription)"
+            statusText = "✗ Redisplay failed: \(error.localizedDescription)"
         }
     }
 
