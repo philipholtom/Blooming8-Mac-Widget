@@ -589,19 +589,6 @@ final class PhotoController: ObservableObject {
         "\(base)_P.jpg"
     }
 
-    private static let maxUploadFilenameLength = 12
-
-    /// Strips everything but ASCII letters/digits and truncates, leaving
-    /// room for the required "_P.jpg" suffix so the whole filename stays
-    /// close to the old 8.3 short-name length — folder photos can have
-    /// long names with spaces, punctuation, or unicode that the frame's
-    /// firmware may not handle well.
-    private func sanitizedShortBase(_ raw: String) -> String {
-        let maxBaseLength = max(1, Self.maxUploadFilenameLength - "_P.jpg".count)
-        let filtered = raw.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
-        let truncated = String(filtered.prefix(maxBaseLength))
-        return truncated.isEmpty ? "img" : truncated
-    }
 
     struct LocalFolderCandidate {
         let fileURL: URL
@@ -681,20 +668,8 @@ final class PhotoController: ObservableObject {
             }
 
             let sourceBase = candidate.fileURL.deletingPathExtension().lastPathComponent
-            let filename = portraitFilename(sanitizedShortBase(sourceBase))
-
-            // If any deletes failed, try to delete just the file we're about to
-            // upload as a safety pass — this prevents the frame from having the
-            // old photo if the initial delete_all sweep didn't work.
-            if deleteFailures > 0 {
-                do {
-                    statusText = "→ POST /image/delete?image=\(filename)&gallery=\(gallery) (safety pass)"
-                    try await client.deleteImage(ip: settings.deviceIP, filename: filename, gallery: gallery)
-                    statusText = "← /image/delete OK (cleared conflict)"
-                } catch {
-                    statusText = "← /image/delete failed: \(error.localizedDescription)"
-                }
-            }
+            let timestamp = Int(Date().timeIntervalSince1970)
+            let filename = portraitFilename("\(sourceBase)_\(timestamp)")
 
             statusText = "→ POST /upload?filename=\(filename)&gallery=\(gallery)&show_now=1\n📦 \(Int(candidate.jpegData.count / 1024))KB"
             let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: candidate.jpegData, showNow: true)
