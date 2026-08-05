@@ -6,6 +6,7 @@ import Combine
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    private var contentView: ContentView?
     private let settings = Settings()
     private lazy var controller = PhotoController(settings: settings)
     private var activityToken: NSObjectProtocol?
@@ -39,7 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.updateStatusIcon(isAwake: isAwake)
             }
 
-        let hostingController = NSHostingController(rootView: ContentView(settings: settings, controller: controller))
+        let contentView = ContentView(settings: settings, controller: controller)
+        let hostingController = NSHostingController(rootView: contentView)
         // Let the popover grow/shrink to fit however many galleries are listed,
         // instead of a fixed height that needs an inner scroll view.
         hostingController.sizingOptions = [.preferredContentSize]
@@ -48,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.contentViewController = hostingController
         self.popover = popover
+        self.contentView = contentView
     }
 
     /// Sets the menu bar icon's shape/color to reflect whether the frame is
@@ -88,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func togglePopover(_ sender: AnyObject?) {
         guard let button = statusItem?.button, let popover else { return }
         if popover.isShown {
+            contentView?.resetHiddenTabVisibility()
             popover.performClose(sender)
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)

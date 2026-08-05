@@ -40,6 +40,8 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            revealHiddenTabsShortcut
+
             header
 
             ZStack {
@@ -758,7 +760,7 @@ struct ContentView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 tabChip(name: "All", selection: .gallery(nil), isLocked: false)
-                ForEach(settings.tabs) { tab in
+                ForEach(settings.tabs.filter { !$0.isLocked || controller.showHiddenTabs }) { tab in
                     tabChip(
                         name: tab.name,
                         selection: .gallery(tab.id),
@@ -769,6 +771,19 @@ struct ContentView: View {
                 tabChip(name: "📁 Local Folder", selection: .localFolder, isLocked: false)
             }
         }
+    }
+
+    /// Invisible — exists purely to register the ⌘⇧L shortcut that reveals
+    /// locked tabs in the bar above without a visible control anyone could
+    /// stumble onto.
+    private var revealHiddenTabsShortcut: some View {
+        Button("") {
+            controller.showHiddenTabs.toggle()
+        }
+        .keyboardShortcut("l", modifiers: [.command, .shift])
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
     }
 
     private func tabChip(name: String, selection: ActiveSelection, isLocked: Bool) -> some View {
@@ -882,5 +897,18 @@ struct ContentView: View {
                 }
             }
         )
+    }
+}
+
+extension ContentView {
+    /// When the popover hosting this view closes, hide the hidden tabs again
+    /// so a keyboard-revealed state doesn't linger for the next person who
+    /// opens the popover. We can't use NSPopover's didClose delegate directly
+    /// on a SwiftUI hosted view, so this hook is called from AppDelegate
+    /// after detaching the popover's menu.
+    func resetHiddenTabVisibility() {
+        if controller.showHiddenTabs {
+            controller.showHiddenTabs = false
+        }
     }
 }

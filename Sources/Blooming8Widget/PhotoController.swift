@@ -23,6 +23,11 @@ final class PhotoController: ObservableObject {
     @Published var isBusy: Bool = false
     /// Tabs unlocked this app session (in-memory only — re-locks on relaunch).
     @Published var unlockedTabIDs: Set<UUID> = []
+    /// Whether locked tabs are currently shown in the tab bar at all — off by
+    /// default so they don't appear to a casual viewer of the popover, toggled
+    /// with a keyboard shortcut, and reset to hidden whenever the popover
+    /// closes so it doesn't stay revealed for the next person who opens it.
+    @Published var showHiddenTabs: Bool = false
     /// When the next automatic random photo is scheduled to fire, if enabled.
     @Published var nextAutoRandomFireDate: Date?
     /// Whether the frame answered the last reachability check — nil means no
@@ -329,8 +334,10 @@ final class PhotoController: ObservableObject {
         isBusy = true
         defer { isBusy = false }
         do {
+            statusText = "→ GET /deviceInfo"
             let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
             applyDeviceInfo(info)
+            statusText = "← /deviceInfo OK"
             guard let path = info.image, !path.isEmpty else {
                 statusText = "No current photo to redisplay."
                 return
@@ -340,26 +347,30 @@ final class PhotoController: ObservableObject {
             var lastError: Error?
             for attempt in 1...maxAttempts {
                 do {
+                    statusText = "→ POST /show?image=\(path)"
                     try await client.show(ip: settings.deviceIP, imagePath: path)
+                    statusText = "← /show OK"
                     lastError = nil
                     break
                 } catch {
                     lastError = error
                     if attempt < maxAttempts {
-                        statusText = "Frame busy, retrying (\(attempt)/\(maxAttempts))..."
+                        statusText = "← /show BUSY, retrying (\(attempt)/\(maxAttempts))..."
                         try? await Task.sleep(nanoseconds: 2_000_000_000)
                     }
                 }
             }
             if let lastError { throw lastError }
 
+            statusText = "→ GET \(path)"
             let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
+            statusText = "← image OK (\(Int(data.count / 1024))KB)"
             previewImage = NSImage(data: data)
             currentImageData = data
             currentImagePath = path
-            statusText = "Redisplayed the current photo."
+            statusText = "✓ Redisplayed"
         } catch {
-            statusText = "Couldn't redisplay photo: \(error.localizedDescription)"
+            statusText = "✗ Redisplay failed: \(error.localizedDescription)"
         }
     }
 
@@ -578,19 +589,6 @@ final class PhotoController: ObservableObject {
         "\(base)_P.jpg"
     }
 
-    private static let maxUploadFilenameLength = 12
-
-    /// Strips everything but ASCII letters/digits and truncates, leaving
-    /// room for the required "_P.jpg" suffix so the whole filename stays
-    /// close to the old 8.3 short-name length — folder photos can have
-    /// long names with spaces, punctuation, or unicode that the frame's
-    /// firmware may not handle well.
-    private func sanitizedShortBase(_ raw: String) -> String {
-        let maxBaseLength = max(1, Self.maxUploadFilenameLength - "_P.jpg".count)
-        let filtered = raw.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
-        let truncated = String(filtered.prefix(maxBaseLength))
-        return truncated.isEmpty ? "img" : truncated
-    }
 
     struct LocalFolderCandidate {
         let fileURL: URL
@@ -643,37 +641,50 @@ final class PhotoController: ObservableObject {
         isBusy = true
         defer { isBusy = false }
         do {
+            statusText = "→ GET /deviceInfo"
             let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
             applyDeviceInfo(info)
+            statusText = "← /deviceInfo OK"
 
             let gallery = "Random"
+            statusText = "→ PUT /gallery?name=\(gallery)"
             await client.ensureGallery(ip: settings.deviceIP, name: gallery)
+            statusText = "← /gallery OK"
 
+            statusText = "→ GET /gallery?gallery_name=\(gallery)"
             let existing = try await client.fetchAllImages(ip: settings.deviceIP, gallery: gallery)
+            statusText = "← /gallery OK (\(existing.count) image\(existing.count == 1 ? "" : "s"))"
+
             var deleteFailures = 0
-            for name in existing {
+            for (idx, name) in existing.enumerated() {
                 do {
+                    statusText = "→ POST /image/delete?image=\(name)&gallery=\(gallery) [\(idx + 1)/\(existing.count)]"
                     try await client.deleteImage(ip: settings.deviceIP, filename: name, gallery: gallery)
+                    statusText = "← /image/delete OK"
                 } catch {
                     deleteFailures += 1
+                    statusText = "← /image/delete failed: \(error.localizedDescription)"
                 }
             }
 
             let sourceBase = candidate.fileURL.deletingPathExtension().lastPathComponent
-            let filename = portraitFilename(sanitizedShortBase(sourceBase))
+            let timestamp = Int(Date().timeIntervalSince1970)
+            let filename = portraitFilename("\(sourceBase)_\(timestamp)")
+
+            statusText = "→ POST /upload?filename=\(filename)&gallery=\(gallery)&show_now=1\n📦 \(Int(candidate.jpegData.count / 1024))KB"
             let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: candidate.jpegData, showNow: true)
 
             previewImage = candidate.image
             currentImageData = candidate.jpegData
             currentImagePath = path
             currentGalleryOnDevice = gallery
-            let deleteWarning = deleteFailures > 0 ? " (\(deleteFailures) old photo\(deleteFailures == 1 ? "" : "s") couldn't be removed)" : ""
-            statusText = "Showed '\(candidate.fileURL.lastPathComponent)' from local folder.\(deleteWarning)"
+            let deleteWarning = deleteFailures > 0 ? " (\(deleteFailures) old photo\(deleteFailures == 1 ? "" : "s") failed)" : ""
+            statusText = "← /upload OK\n✓ Displayed \(filename)\(deleteWarning)"
             localFolderCandidate = nil
 
             await loadGalleries()
         } catch {
-            statusText = "Couldn't show a random local photo: \(error.localizedDescription)"
+            statusText = "✗ \(error.localizedDescription)"
         }
     }
 
