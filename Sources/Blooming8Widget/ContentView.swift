@@ -37,6 +37,7 @@ struct ContentView: View {
 
     @State private var newTabName: String = ""
     @State private var passwordDrafts: [UUID: String] = [:]
+    @State private var selectedLocalFolderIndex: Int = 0
 
     var body: some View {
         VStack(spacing: 12) {
@@ -47,7 +48,10 @@ struct ContentView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(Color.gray.opacity(0.15))
-                if let previewImage = controller.localFolderCandidates.first?.image ?? controller.previewImage {
+                let previewImage = controller.localFolderCandidates.indices.contains(selectedLocalFolderIndex)
+                    ? controller.localFolderCandidates[selectedLocalFolderIndex].image
+                    : (controller.localFolderCandidates.first?.image ?? controller.previewImage)
+                if let previewImage = previewImage {
                     Image(nsImage: previewImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -64,6 +68,9 @@ struct ContentView: View {
                 Text("Pick one of 3")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .onChange(of: controller.localFolderCandidates.count) { _ in
+                        selectedLocalFolderIndex = 0
+                    }
             } else if let currentImagePath = controller.currentImagePath {
                 Text(currentImagePath)
                     .font(.system(size: 10, design: .monospaced))
@@ -622,11 +629,7 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 ForEach(Array(controller.localFolderCandidates.enumerated()), id: \.offset) { index, candidate in
                     Button {
-                        // Rotate candidates so selected one is first
-                        var rotated = controller.localFolderCandidates
-                        rotated.append(contentsOf: rotated.prefix(index))
-                        rotated.removeFirst(index)
-                        controller.localFolderCandidates = rotated
+                        selectedLocalFolderIndex = index
                     } label: {
                         Image(nsImage: candidate.image)
                             .resizable()
@@ -634,10 +637,10 @@ struct ContentView: View {
                             .frame(height: 60)
                             .clipped()
                             .cornerRadius(4)
-                            .opacity(index == 0 ? 1.0 : 0.6)
+                            .opacity(index == selectedLocalFolderIndex ? 1.0 : 0.6)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 4)
-                                    .stroke(index == 0 ? Color.blue : Color.clear, lineWidth: 2)
+                                    .stroke(index == selectedLocalFolderIndex ? Color.blue : Color.clear, lineWidth: 2)
                             )
                     }
                     .buttonStyle(.plain)
@@ -657,8 +660,8 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
 
                 Button("Send") {
-                    if let selected = controller.localFolderCandidates.first {
-                        Task { await controller.confirmLocalFolderCandidate(selected) }
+                    if controller.localFolderCandidates.indices.contains(selectedLocalFolderIndex) {
+                        Task { await controller.confirmLocalFolderCandidate(controller.localFolderCandidates[selectedLocalFolderIndex]) }
                     }
                 }
                 .buttonStyle(.borderedProminent)
