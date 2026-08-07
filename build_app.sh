@@ -3,11 +3,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="Blooming8Widget"
-BUILD_CONFIG="release"
+BUILD_CONFIG="Release"
+XCODE_BETA="/Applications/Xcode-beta.app/Contents/Developer"
+DERIVED_DATA="$HOME/Library/Developer/Xcode/DerivedData/Blooming8_Screen_Widget-bemzrgmnicnbnxfhqswrxccqxuqi"
 
-swift build -c "$BUILD_CONFIG"
+"$XCODE_BETA/usr/bin/xcodebuild" -scheme "$APP_NAME" -configuration "$BUILD_CONFIG" -destination "generic/platform=macOS" build
 
-BIN_PATH=".build/$BUILD_CONFIG/$APP_NAME"
+BIN_PATH="$DERIVED_DATA/Build/Products/$BUILD_CONFIG/$APP_NAME"
 APP_BUNDLE="$APP_NAME.app"
 
 rm -rf "$APP_BUNDLE"

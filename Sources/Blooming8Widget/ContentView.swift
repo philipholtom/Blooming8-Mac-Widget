@@ -816,24 +816,24 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             SecureField("Password", text: $unlockPasswordDraft)
                 .textFieldStyle(.roundedBorder)
-                .onSubmit { attemptUnlock(tab) }
+                .onSubmit { attemptUnlock(tab, unlockError: $unlockError, unlockPasswordDraft: $unlockPasswordDraft) }
             if unlockError {
                 Text("Incorrect password.")
                     .font(.caption2)
                     .foregroundStyle(.red)
             }
-            Button("Unlock") { attemptUnlock(tab) }
+            Button("Unlock") { attemptUnlock(tab, unlockError: $unlockError, unlockPasswordDraft: $unlockPasswordDraft) }
                 .buttonStyle(.borderedProminent)
                 .disabled(unlockPasswordDraft.isEmpty)
         }
     }
 
-    private func attemptUnlock(_ tab: GalleryTab) {
-        if controller.unlock(tab: tab, password: unlockPasswordDraft) {
-            unlockError = false
-            unlockPasswordDraft = ""
+    private func attemptUnlock(_ tab: GalleryTab, unlockError: Binding<Bool>, unlockPasswordDraft: Binding<String>) {
+        if controller.unlock(tab: tab, password: unlockPasswordDraft.wrappedValue) {
+            unlockError.wrappedValue = false
+            unlockPasswordDraft.wrappedValue = ""
         } else {
-            unlockError = true
+            unlockError.wrappedValue = true
         }
     }
 
