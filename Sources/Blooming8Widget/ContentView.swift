@@ -38,6 +38,10 @@ struct ContentView: View {
     @State private var newTabName: String = ""
     @State private var passwordDrafts: [UUID: String] = [:]
 
+    @State private var showBrowseFolderGallery: Bool = false
+    @State private var browseImageURLs: [URL] = []
+    @State private var isBrowsingLoading: Bool = false
+
     var body: some View {
         VStack(spacing: 12) {
             revealHiddenTabsShortcut
@@ -748,10 +752,94 @@ struct ContentView: View {
                     }
                 }
             }
+            HStack {
+                Button("Browse Gallery") {
+                    isBrowsingLoading = true
+                    Task {
+                        browseImageURLs = await controller.getAllImagesInFolder()
+                        isBrowsingLoading = false
+                        showBrowseFolderGallery = true
+                    }
+                }
+                .disabled(settings.randomFolderPath.trimmingCharacters(in: .whitespaces).isEmpty)
+                Spacer()
+            }
             Text("Picks a random photo from this folder (including subfolders) and uploads it to a \"Random\" gallery on the frame, deleting whatever photo was there before.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+        .sheet(isPresented: $showBrowseFolderGallery) {
+            browseFolderGallerySheet
+        }
+    }
+
+    private var browseFolderGallerySheet: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("Browse Photos")
+                    .font(.headline)
+                Spacer()
+                Button("Close") { showBrowseFolderGallery = false }
+            }
+            .padding()
+
+            if isBrowsingLoading {
+                VStack {
+                    ProgressView()
+                    Text("Loading \(browseImageURLs.count) images...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if browseImageURLs.isEmpty {
+                VStack {
+                    Text("No images found")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                        ForEach(browseImageURLs, id: \.self) { url in
+                            Button {
+                                controller.prepareBrowsedImage(url: url)
+                                showBrowseFolderGallery = false
+                            } label: {
+                                ZStack(alignment: .bottomTrailing) {
+                                    Image(nsImage: thumbnailImage(for: url))
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(height: 100)
+                                        .clipped()
+                                        .background(Color.gray.opacity(0.2))
+
+                                    Text(url.lastPathComponent)
+                                        .font(.caption2)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .padding(4)
+                                        .background(Color.black.opacity(0.6))
+                                        .foregroundStyle(.white)
+                                }
+                                .cornerRadius(4)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding()
+                }
+            }
+        }
+    }
+
+    private func thumbnailImage(for url: URL) -> NSImage {
+        if let cgImage = loadUprightCGImage(at: url, maxPixelSize: 150) {
+            if let thumbnail = renderLetterboxed(cgImage: cgImage, width: 150, height: 150, background: .black) {
+                return thumbnail
+            }
+        }
+        return NSImage(systemSymbolName: "photo", accessibilityDescription: "Photo")!
     }
 
     // MARK: - Tab bar

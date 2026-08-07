@@ -701,4 +701,26 @@ final class PhotoController: ObservableObject {
         }
         return files
     }
+
+    /// Loads all images from the folder asynchronously, returning them in sorted order.
+    func getAllImagesInFolder() async -> [URL] {
+        let folderPath = settings.randomFolderPath.trimmingCharacters(in: .whitespaces)
+        guard !folderPath.isEmpty else { return [] }
+        let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
+        let images = enumerateImageFiles(in: folderURL)
+        return images.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    /// Loads and prepares a specific image from the local folder for display.
+    func prepareBrowsedImage(url: URL) {
+        guard let cgImage = loadUprightCGImage(at: url),
+              let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+              let jpeg = ImageCanvas.jpegData(framed)
+        else {
+            statusText = "Couldn't read '\(url.lastPathComponent)'."
+            return
+        }
+        localFolderCandidate = LocalFolderCandidate(fileURL: url, image: framed, jpegData: jpeg)
+        statusText = ""
+    }
 }
