@@ -38,10 +38,6 @@ struct ContentView: View {
     @State private var newTabName: String = ""
     @State private var passwordDrafts: [UUID: String] = [:]
 
-    @State private var showBrowseFolderGallery: Bool = false
-    @State private var browseImageURLs: [URL] = []
-    @State private var isBrowsingLoading: Bool = false
-
     var body: some View {
         VStack(spacing: 12) {
             revealHiddenTabsShortcut
@@ -51,7 +47,7 @@ struct ContentView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(Color.gray.opacity(0.15))
-                if let previewImage = controller.localFolderCandidate?.image ?? controller.previewImage {
+                if let previewImage = controller.localFolderCandidates.first?.image ?? controller.previewImage {
                     Image(nsImage: previewImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -64,12 +60,10 @@ struct ContentView: View {
             }
             .frame(height: 220)
 
-            if let candidate = controller.localFolderCandidate {
-                Text("Preview — \(candidate.fileURL.lastPathComponent)")
+            if !controller.localFolderCandidates.isEmpty {
+                Text("Pick one of 3")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
             } else if let currentImagePath = controller.currentImagePath {
                 Text(currentImagePath)
                     .font(.system(size: 10, design: .monospaced))
@@ -92,7 +86,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if controller.localFolderCandidate != nil {
+            if !controller.localFolderCandidates.isEmpty {
                 localFolderPreviewControls
             } else if showSettings {
                 settingsForm
@@ -621,22 +615,46 @@ struct ContentView: View {
 
     private var localFolderPreviewControls: some View {
         VStack(spacing: 8) {
-            Text("Not sent to the frame yet.")
+            Text("Click to select, then Send")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                ForEach(Array(controller.localFolderCandidates.enumerated()), id: \.offset) { index, candidate in
+                    Button {
+                        // Rotate candidates so selected one is first
+                        var rotated = controller.localFolderCandidates
+                        rotated.append(contentsOf: rotated.prefix(index))
+                        rotated.removeFirst(index)
+                        controller.localFolderCandidates = rotated
+                    } label: {
+                        Image(nsImage: candidate.image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(height: 60)
+                            .clipped()
+                            .cornerRadius(4)
+                            .opacity(index == 0 ? 1.0 : 0.6)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(index == 0 ? Color.blue : Color.clear, lineWidth: 2)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+
             HStack(spacing: 8) {
                 Button("Cancel") {
                     controller.cancelLocalFolderCandidate()
                 }
                 .frame(maxWidth: .infinity)
 
-                Button("Next") {
-                    controller.prepareLocalFolderCandidate()
-                }
-                .frame(maxWidth: .infinity)
-
                 Button("Send") {
-                    Task { await controller.confirmLocalFolderCandidate() }
+                    if let selected = controller.localFolderCandidates.first {
+                        Task { await controller.confirmLocalFolderCandidate(selected) }
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
@@ -752,89 +770,9 @@ struct ContentView: View {
                     }
                 }
             }
-            HStack {
-                Button("Browse Gallery") {
-                    isBrowsingLoading = true
-                    Task {
-                        browseImageURLs = await controller.getAllImagesInFolder()
-                        isBrowsingLoading = false
-                        showBrowseFolderGallery = true
-                    }
-                }
-                .disabled(settings.randomFolderPath.trimmingCharacters(in: .whitespaces).isEmpty)
-                Spacer()
-            }
-            Text("Picks a random photo from this folder (including subfolders) and uploads it to a \"Random\" gallery on the frame, deleting whatever photo was there before.")
+            Text("When you pick a random photo, you'll see 3 options to choose from.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-        }
-        .sheet(isPresented: $showBrowseFolderGallery) {
-            browseFolderGallerySheet
-        }
-    }
-
-    private var browseFolderGallerySheet: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Text("Browse Photos")
-                    .font(.headline)
-                Spacer()
-                Button("Close") { showBrowseFolderGallery = false }
-            }
-            .padding()
-
-            if isBrowsingLoading {
-                VStack {
-                    ProgressView()
-                    Text("Loading \(browseImageURLs.count) images...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if browseImageURLs.isEmpty {
-                VStack {
-                    Text("No images found")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(browseImageURLs, id: \.self) { url in
-                            Button {
-                                controller.prepareBrowsedImage(url: url)
-                                showBrowseFolderGallery = false
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "photo")
-                                        .font(.system(size: 14))
-                                        .foregroundStyle(.blue)
-                                        .frame(width: 20)
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(url.lastPathComponent)
-                                            .font(.caption)
-                                            .lineLimit(1)
-                                        Text(url.deletingLastPathComponent().lastPathComponent)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                    Spacer()
-                                }
-                                .padding(.vertical, 6)
-                                .padding(.horizontal, 8)
-                                .background(Color.gray.opacity(0.1))
-                                .cornerRadius(4)
-                                .foregroundStyle(.primary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding()
-                }
-            }
         }
     }
 

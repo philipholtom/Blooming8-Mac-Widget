@@ -596,15 +596,12 @@ final class PhotoController: ObservableObject {
         let jpegData: Data
     }
 
-    /// A randomly-picked, rendered photo awaiting the user's approval — set
-    /// by `prepareLocalFolderCandidate()`, and only actually uploaded once
-    /// `confirmLocalFolderCandidate()` is called, so nothing reaches the
-    /// frame until the user has seen and approved it.
-    @Published var localFolderCandidate: LocalFolderCandidate?
+    /// Multiple randomly-picked candidates for the user to choose from.
+    /// Set by `prepareLocalFolderCandidate()`, cleared by `cancelLocalFolderCandidate()`.
+    @Published var localFolderCandidates: [LocalFolderCandidate] = []
 
-    /// Picks a random image from the local folder in Settings and renders it
-    /// for preview, replacing any candidate already awaiting approval (used
-    /// for both the initial pick and "Next").
+    /// Picks 3 random images from the local folder, renders them for preview,
+    /// and presents them for the user to choose from.
     func prepareLocalFolderCandidate() {
         let folderPath = settings.randomFolderPath.trimmingCharacters(in: .whitespaces)
         guard !folderPath.isEmpty else {
@@ -612,32 +609,44 @@ final class PhotoController: ObservableObject {
             return
         }
         let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
-        guard let chosen = enumerateImageFiles(in: folderURL).randomElement() else {
+        let allImages = enumerateImageFiles(in: folderURL)
+        guard allImages.count >= 1 else {
             statusText = "No photos found in '\(folderURL.lastPathComponent)'."
             return
         }
-        guard let cgImage = loadUprightCGImage(at: chosen),
-              let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
-              let jpeg = ImageCanvas.jpegData(framed)
-        else {
-            statusText = "Couldn't read '\(chosen.lastPathComponent)'."
+
+        var candidates: [LocalFolderCandidate] = []
+        let chosenURLs = allImages.shuffled().prefix(min(3, allImages.count))
+
+        for chosen in chosenURLs {
+            guard let cgImage = loadUprightCGImage(at: chosen),
+                  let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+                  let jpeg = ImageCanvas.jpegData(framed)
+            else {
+                continue
+            }
+            candidates.append(LocalFolderCandidate(fileURL: chosen, image: framed, jpegData: jpeg))
+        }
+
+        guard !candidates.isEmpty else {
+            statusText = "Couldn't read any photos from '\(folderURL.lastPathComponent)'."
             return
         }
-        localFolderCandidate = LocalFolderCandidate(fileURL: chosen, image: framed, jpegData: jpeg)
+
+        localFolderCandidates = candidates
         statusText = ""
     }
 
-    /// Discards the pending candidate without uploading anything.
+    /// Discards all pending candidates without uploading anything.
     func cancelLocalFolderCandidate() {
-        localFolderCandidate = nil
+        localFolderCandidates = []
     }
 
     /// Uploads the approved candidate to the frame's "Random" gallery and
     /// displays it immediately. That gallery is meant to hold exactly one
     /// photo at a time, so whatever's already in it is deleted first rather
     /// than left to accumulate.
-    func confirmLocalFolderCandidate() async {
-        guard let candidate = localFolderCandidate else { return }
+    func confirmLocalFolderCandidate(_ candidate: LocalFolderCandidate) async {
         isBusy = true
         defer { isBusy = false }
         do {
@@ -680,7 +689,7 @@ final class PhotoController: ObservableObject {
             currentGalleryOnDevice = gallery
             let deleteWarning = deleteFailures > 0 ? " (\(deleteFailures) old photo\(deleteFailures == 1 ? "" : "s") failed)" : ""
             statusText = "← /upload OK\n✓ Displayed \(filename)\(deleteWarning)"
-            localFolderCandidate = nil
+            localFolderCandidates = []
 
             await loadGalleries()
         } catch {
@@ -702,30 +711,4 @@ final class PhotoController: ObservableObject {
         return files
     }
 
-    /// Loads all images from the folder asynchronously on a background thread,
-    /// returning them in sorted order. This prevents blocking the UI while
-    /// enumerating potentially thousands of files.
-    func getAllImagesInFolder() async -> [URL] {
-        let folderPath = settings.randomFolderPath.trimmingCharacters(in: .whitespaces)
-        guard !folderPath.isEmpty else { return [] }
-        let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
-
-        return await Task.detached(priority: .userInitiated) { () -> [URL] in
-            let images = self.enumerateImageFiles(in: folderURL)
-            return images.sorted { $0.lastPathComponent < $1.lastPathComponent }
-        }.value
-    }
-
-    /// Loads and prepares a specific image from the local folder for display.
-    func prepareBrowsedImage(url: URL) {
-        guard let cgImage = loadUprightCGImage(at: url),
-              let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
-              let jpeg = ImageCanvas.jpegData(framed)
-        else {
-            statusText = "Couldn't read '\(url.lastPathComponent)'."
-            return
-        }
-        localFolderCandidate = LocalFolderCandidate(fileURL: url, image: framed, jpegData: jpeg)
-        statusText = ""
-    }
 }
