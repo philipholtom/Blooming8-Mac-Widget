@@ -800,29 +800,34 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
                         ForEach(browseImageURLs, id: \.self) { url in
                             Button {
                                 controller.prepareBrowsedImage(url: url)
                                 showBrowseFolderGallery = false
                             } label: {
-                                ZStack(alignment: .bottomTrailing) {
-                                    Image(nsImage: thumbnailImage(for: url))
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(height: 100)
-                                        .clipped()
-                                        .background(Color.gray.opacity(0.2))
+                                HStack(spacing: 8) {
+                                    Image(systemName: "photo")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(.blue)
+                                        .frame(width: 20)
 
-                                    Text(url.lastPathComponent)
-                                        .font(.caption2)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                        .padding(4)
-                                        .background(Color.black.opacity(0.6))
-                                        .foregroundStyle(.white)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(url.lastPathComponent)
+                                            .font(.caption)
+                                            .lineLimit(1)
+                                        Text(url.deletingLastPathComponent().lastPathComponent)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
                                 }
+                                .padding(.vertical, 6)
+                                .padding(.horizontal, 8)
+                                .background(Color.gray.opacity(0.1))
                                 .cornerRadius(4)
+                                .foregroundStyle(.primary)
                             }
                             .buttonStyle(.plain)
                         }
@@ -831,15 +836,6 @@ struct ContentView: View {
                 }
             }
         }
-    }
-
-    private func thumbnailImage(for url: URL) -> NSImage {
-        if let cgImage = loadUprightCGImage(at: url, maxPixelSize: 150) {
-            if let thumbnail = renderLetterboxed(cgImage: cgImage, width: 150, height: 150, background: .black) {
-                return thumbnail
-            }
-        }
-        return NSImage(systemSymbolName: "photo", accessibilityDescription: "Photo")!
     }
 
     // MARK: - Tab bar
