@@ -651,6 +651,11 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity)
 
+                Button("Next") {
+                    controller.prepareLocalFolderCandidate()
+                }
+                .frame(maxWidth: .infinity)
+
                 Button("Send") {
                     if let selected = controller.localFolderCandidates.first {
                         Task { await controller.confirmLocalFolderCandidate(selected) }
