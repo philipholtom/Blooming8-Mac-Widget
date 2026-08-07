@@ -577,7 +577,7 @@ final class PhotoController: ObservableObject {
         }
     }
 
-    private static let imageFileExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "gif", "bmp", "tiff", "tif", "webp"]
+    nonisolated private static let imageFileExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "gif", "bmp", "tiff", "tif", "webp"]
 
     /// The frame's firmware requires uploaded filenames to end with `_P.jpg`
     /// (portrait) or `_L.jpg` (landscape — the device rotates the stored
@@ -688,7 +688,7 @@ final class PhotoController: ObservableObject {
         }
     }
 
-    private func enumerateImageFiles(in folder: URL) -> [URL] {
+    nonisolated private func enumerateImageFiles(in folder: URL) -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: folder,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -702,13 +702,18 @@ final class PhotoController: ObservableObject {
         return files
     }
 
-    /// Loads all images from the folder asynchronously, returning them in sorted order.
+    /// Loads all images from the folder asynchronously on a background thread,
+    /// returning them in sorted order. This prevents blocking the UI while
+    /// enumerating potentially thousands of files.
     func getAllImagesInFolder() async -> [URL] {
         let folderPath = settings.randomFolderPath.trimmingCharacters(in: .whitespaces)
         guard !folderPath.isEmpty else { return [] }
         let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
-        let images = enumerateImageFiles(in: folderURL)
-        return images.sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        return await Task.detached(priority: .userInitiated) { () -> [URL] in
+            let images = self.enumerateImageFiles(in: folderURL)
+            return images.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        }.value
     }
 
     /// Loads and prepares a specific image from the local folder for display.
