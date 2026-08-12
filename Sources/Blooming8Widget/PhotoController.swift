@@ -600,8 +600,8 @@ final class PhotoController: ObservableObject {
     /// Set by `prepareLocalFolderCandidate()`, cleared by `cancelLocalFolderCandidate()`.
     @Published var localFolderCandidates: [LocalFolderCandidate] = []
 
-    /// Picks 3 random images from the local folder, renders them for preview,
-    /// and presents them for the user to choose from.
+    /// Picks 3 random images from the local folder, renders them for preview on
+    /// a background thread, and presents them for the user to choose from.
     func prepareLocalFolderCandidate() {
         let folderPath = settings.randomFolderPath.trimmingCharacters(in: .whitespaces)
         guard !folderPath.isEmpty else {
@@ -615,26 +615,30 @@ final class PhotoController: ObservableObject {
             return
         }
 
-        var candidates: [LocalFolderCandidate] = []
-        let chosenURLs = allImages.shuffled().prefix(min(3, allImages.count))
+        Task.detached(priority: .userInitiated) { [weak self] in
+            var candidates: [LocalFolderCandidate] = []
+            let chosenURLs = allImages.shuffled().prefix(min(3, allImages.count))
 
-        for chosen in chosenURLs {
-            guard let cgImage = loadUprightCGImage(at: chosen),
-                  let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
-                  let jpeg = ImageCanvas.jpegData(framed)
-            else {
-                continue
+            for chosen in chosenURLs {
+                guard let cgImage = loadUprightCGImage(at: chosen),
+                      let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+                      let jpeg = ImageCanvas.jpegData(framed)
+                else {
+                    continue
+                }
+                candidates.append(LocalFolderCandidate(fileURL: chosen, image: framed, jpegData: jpeg))
             }
-            candidates.append(LocalFolderCandidate(fileURL: chosen, image: framed, jpegData: jpeg))
-        }
 
-        guard !candidates.isEmpty else {
-            statusText = "Couldn't read any photos from '\(folderURL.lastPathComponent)'."
-            return
-        }
+            await MainActor.run {
+                guard !candidates.isEmpty else {
+                    self?.statusText = "Couldn't read any photos from '\(folderURL.lastPathComponent)'."
+                    return
+                }
 
-        localFolderCandidates = candidates
-        statusText = ""
+                self?.localFolderCandidates = candidates
+                self?.statusText = ""
+            }
+        }
     }
 
     /// Discards all pending candidates without uploading anything.
