@@ -683,21 +683,41 @@ final class PhotoController: ObservableObject {
             let sourceBase = candidate.fileURL.deletingPathExtension().lastPathComponent
             let timestamp = Int(Date().timeIntervalSince1970)
             let filename = portraitFilename("\(sourceBase)_\(timestamp)")
+            let fileSizeKB = Int(candidate.jpegData.count / 1024)
 
-            statusText = "→ POST /upload?filename=\(filename)&gallery=\(gallery)&show_now=1\n📦 \(Int(candidate.jpegData.count / 1024))KB"
-            let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: candidate.jpegData, showNow: true)
+            // Retry upload up to 3 times if it fails
+            var uploadSuccess = false
+            var lastError: Error? = nil
+            for attempt in 1...3 {
+                do {
+                    statusText = "→ POST /upload?filename=\(filename)&gallery=\(gallery)&show_now=1\n📦 \(fileSizeKB)KB [Attempt \(attempt)/3]"
+                    let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: candidate.jpegData, showNow: true)
 
-            previewImage = candidate.image
-            currentImageData = candidate.jpegData
-            currentImagePath = path
-            currentGalleryOnDevice = gallery
-            let deleteWarning = deleteFailures > 0 ? " (\(deleteFailures) old photo\(deleteFailures == 1 ? "" : "s") failed)" : ""
-            statusText = "← /upload OK\n✓ Displayed \(filename)\(deleteWarning)"
+                    previewImage = candidate.image
+                    currentImageData = candidate.jpegData
+                    currentImagePath = path
+                    currentGalleryOnDevice = gallery
+                    let deleteWarning = deleteFailures > 0 ? " (\(deleteFailures) old photo\(deleteFailures == 1 ? "" : "s") failed)" : ""
+                    statusText = "← /upload OK\n✓ Displayed \(filename)\(deleteWarning)"
+                    uploadSuccess = true
+                    break
+                } catch {
+                    lastError = error
+                    statusText = "← /upload failed (attempt \(attempt)/3): \(error.localizedDescription)"
+                    if attempt < 3 {
+                        try await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000) // Wait 1-2 seconds before retry
+                    }
+                }
+            }
+
+            if !uploadSuccess {
+                throw lastError ?? BloominError.badResponse("Upload failed after 3 attempts")
+            }
+
             localFolderCandidates = []
-
             await loadGalleries()
         } catch {
-            statusText = "✗ \(error.localizedDescription)"
+            statusText = "✗ Upload error: \(error.localizedDescription)\n(File: \(candidate.fileURL.lastPathComponent))"
         }
     }
 
