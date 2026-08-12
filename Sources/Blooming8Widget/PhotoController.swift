@@ -697,6 +697,41 @@ final class PhotoController: ObservableObject {
         }
     }
 
+    /// Deletes all images from the Random gallery on the device.
+    func deleteRandomGallery() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            statusText = "→ GET /deviceInfo"
+            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+            applyDeviceInfo(info)
+            statusText = "← /deviceInfo OK"
+
+            let gallery = "Random"
+            statusText = "→ GET /gallery?gallery_name=\(gallery)"
+            let existing = try await client.fetchAllImages(ip: settings.deviceIP, gallery: gallery)
+            statusText = "← /gallery OK (\(existing.count) image\(existing.count == 1 ? "" : "s"))"
+
+            var deleteFailures = 0
+            for (idx, name) in existing.enumerated() {
+                do {
+                    statusText = "→ POST /image/delete?image=\(name)&gallery=\(gallery) [\(idx + 1)/\(existing.count)]"
+                    try await client.deleteImage(ip: settings.deviceIP, filename: name, gallery: gallery)
+                    statusText = "← /image/delete OK"
+                } catch {
+                    deleteFailures += 1
+                    statusText = "← /image/delete failed: \(error.localizedDescription)"
+                }
+            }
+
+            let deleteWarning = deleteFailures > 0 ? " (\(deleteFailures) photo\(deleteFailures == 1 ? "" : "s") failed)" : ""
+            statusText = "✓ Deleted all photos from Random gallery\(deleteWarning)"
+            await loadGalleries()
+        } catch {
+            statusText = "✗ \(error.localizedDescription)"
+        }
+    }
+
     nonisolated private func enumerateImageFiles(in folder: URL) -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: folder,

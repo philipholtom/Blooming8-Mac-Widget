@@ -778,6 +778,13 @@ struct ContentView: View {
                     }
                 }
             }
+            HStack {
+                Button("Delete Random Gallery", role: .destructive) {
+                    Task { await controller.deleteRandomGallery() }
+                }
+                .font(.caption)
+                Spacer()
+            }
             Text("When you pick a random photo, you'll see 3 options to choose from.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
