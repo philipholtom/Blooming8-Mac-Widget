@@ -268,6 +268,18 @@ final class BloominClient {
         try checkStatus(response)
     }
 
+    /// Deletes an entire gallery and all its images from the device.
+    func deleteGallery(ip: String, name: String) async throws {
+        var components = URLComponents(string: try baseURL(ip: ip) + "/gallery")!
+        components.queryItems = [
+            URLQueryItem(name: "name", value: name)
+        ]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "DELETE"
+        let (_, response) = try await session.data(for: request)
+        try checkStatus(response)
+    }
+
     private func checkStatus(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else {
             throw BloominError.badResponse("no HTTP response")

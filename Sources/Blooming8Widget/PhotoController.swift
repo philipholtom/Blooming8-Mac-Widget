@@ -697,7 +697,7 @@ final class PhotoController: ObservableObject {
         }
     }
 
-    /// Deletes all images from the Random gallery on the device.
+    /// Deletes the entire Random gallery from the device.
     func deleteRandomGallery() async {
         isBusy = true
         defer { isBusy = false }
@@ -708,24 +708,11 @@ final class PhotoController: ObservableObject {
             statusText = "← /deviceInfo OK"
 
             let gallery = "Random"
-            statusText = "→ GET /gallery?gallery_name=\(gallery)"
-            let existing = try await client.fetchAllImages(ip: settings.deviceIP, gallery: gallery)
-            statusText = "← /gallery OK (\(existing.count) image\(existing.count == 1 ? "" : "s"))"
+            statusText = "→ DELETE /gallery?name=\(gallery)"
+            try await client.deleteGallery(ip: settings.deviceIP, name: gallery)
+            statusText = "← /gallery OK"
 
-            var deleteFailures = 0
-            for (idx, name) in existing.enumerated() {
-                do {
-                    statusText = "→ POST /image/delete?image=\(name)&gallery=\(gallery) [\(idx + 1)/\(existing.count)]"
-                    try await client.deleteImage(ip: settings.deviceIP, filename: name, gallery: gallery)
-                    statusText = "← /image/delete OK"
-                } catch {
-                    deleteFailures += 1
-                    statusText = "← /image/delete failed: \(error.localizedDescription)"
-                }
-            }
-
-            let deleteWarning = deleteFailures > 0 ? " (\(deleteFailures) photo\(deleteFailures == 1 ? "" : "s") failed)" : ""
-            statusText = "✓ Deleted all photos from Random gallery\(deleteWarning)"
+            statusText = "✓ Deleted Random gallery"
             await loadGalleries()
         } catch {
             statusText = "✗ \(error.localizedDescription)"
