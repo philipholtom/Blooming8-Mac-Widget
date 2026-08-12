@@ -644,6 +644,16 @@ struct ContentView: View {
                             )
                     }
                     .buttonStyle(.plain)
+                    .help(candidate.fileURL.path)
+                    .contextMenu {
+                        Button("Open in Finder") {
+                            NSWorkspace.shared.selectFile(candidate.fileURL.path, inFileViewerRootedAtPath: candidate.fileURL.deletingLastPathComponent().path)
+                        }
+                        Button("Copy Path") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(candidate.fileURL.path, forType: .string)
+                        }
+                    }
                 }
                 Spacer()
             }
