@@ -664,22 +664,6 @@ final class PhotoController: ObservableObject {
             await client.ensureGallery(ip: settings.deviceIP, name: gallery)
             statusText = "← /gallery OK"
 
-            statusText = "→ GET /gallery?gallery_name=\(gallery)"
-            let existing = try await client.fetchAllImages(ip: settings.deviceIP, gallery: gallery)
-            statusText = "← /gallery OK (\(existing.count) image\(existing.count == 1 ? "" : "s"))"
-
-            var deleteFailures = 0
-            for (idx, name) in existing.enumerated() {
-                do {
-                    statusText = "→ POST /image/delete?image=\(name)&gallery=\(gallery) [\(idx + 1)/\(existing.count)]"
-                    try await client.deleteImage(ip: settings.deviceIP, filename: name, gallery: gallery)
-                    statusText = "← /image/delete OK"
-                } catch {
-                    deleteFailures += 1
-                    statusText = "← /image/delete failed: \(error.localizedDescription)"
-                }
-            }
-
             let sourceBase = candidate.fileURL.deletingPathExtension().lastPathComponent
             let timestamp = Int(Date().timeIntervalSince1970)
             let filename = portraitFilename("\(sourceBase)_\(timestamp)")
@@ -697,8 +681,7 @@ final class PhotoController: ObservableObject {
                     currentImageData = candidate.jpegData
                     currentImagePath = path
                     currentGalleryOnDevice = gallery
-                    let deleteWarning = deleteFailures > 0 ? " (\(deleteFailures) old photo\(deleteFailures == 1 ? "" : "s") failed)" : ""
-                    statusText = "← /upload OK\n✓ Displayed \(filename)\(deleteWarning)"
+                    statusText = "← /upload OK\n✓ Displayed \(filename)"
                     uploadSuccess = true
                     break
                 } catch {
