@@ -1,6 +1,16 @@
 import SwiftUI
 import AppKit
 
+/// Decoded favorite thumbnails, keyed by file path. SwiftUI re-evaluates the
+/// favorites grid on every state change, and decoding each full-size photo
+/// from disk each time visibly stutters the popover once there are more than
+/// a couple of favorites.
+private let favoriteThumbnailCache: NSCache<NSString, NSImage> = {
+    let cache = NSCache<NSString, NSImage>()
+    cache.countLimit = 200
+    return cache
+}()
+
 struct ContentView: View {
     @ObservedObject var settings: Settings
     @ObservedObject var controller: PhotoController
@@ -704,46 +714,7 @@ struct ContentView: View {
             }
 
             if !settings.favoriteImagePaths.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Favorites")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Clear", role: .destructive) {
-                            settings.favoriteImagePaths.removeAll()
-                        }
-                        .font(.caption2)
-                    }
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 4) {
-                            ForEach(settings.favoriteImagePaths, id: \.self) { path in
-                                if let image = loadFavoriteImage(path: path) {
-                                    Button {
-                                        selectedLocalFolderIndex = -1 // Mark as favorite, not from current batch
-                                        let url = URL(fileURLWithPath: path)
-                                        controller.prepareBrowsedImage(url: url)
-                                    } label: {
-                                        Image(nsImage: image)
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(height: 40)
-                                            .clipped()
-                                            .cornerRadius(3)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help(URL(fileURLWithPath: path).lastPathComponent)
-                                }
-                            }
-                            Spacer()
-                        }
-                    }
-                }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 4)
-                .background(Color.gray.opacity(0.05))
-                .cornerRadius(4)
+                favoritesGrid
             }
 
             HStack(spacing: 8) {
@@ -795,13 +766,106 @@ struct ContentView: View {
         .disabled(controller.isBusy)
     }
 
-    private func loadFavoriteImage(path: String) -> NSImage? {
-        let url = URL(fileURLWithPath: path)
-        if let cgImage = loadUprightCGImage(at: url),
-           let thumbnail = renderLetterboxed(cgImage: cgImage, width: 150, height: 150, background: .black) {
-            return thumbnail
+    private static let favoriteThumbnailHeight: CGFloat = 40
+    private static let favoriteGridSpacing: CGFloat = 4
+    private static let favoriteVisibleRows = 5
+
+    /// Height of `favoriteVisibleRows` thumbnails plus the gaps between them.
+    private var favoritesGridMaxHeight: CGFloat {
+        let rows = CGFloat(Self.favoriteVisibleRows)
+        return rows * Self.favoriteThumbnailHeight + (rows - 1) * Self.favoriteGridSpacing
+    }
+
+    /// Favorites wrap into a scrollable grid rather than a single row — with
+    /// more than a handful, a horizontal strip hides everything past the third
+    /// one with no affordance saying so.
+    private var favoritesGrid: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Favorites (\(settings.favoriteImagePaths.count))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear", role: .destructive) {
+                    settings.favoriteImagePaths.removeAll()
+                }
+                .font(.caption2)
+            }
+
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 52), spacing: Self.favoriteGridSpacing)],
+                    spacing: Self.favoriteGridSpacing
+                ) {
+                    ForEach(settings.favoriteImagePaths, id: \.self) { path in
+                        favoriteThumbnail(path: path)
+                    }
+                }
+                .padding(.trailing, 2) // keep the scrollbar off the thumbnails
+            }
+            // Grows to five rows, then scrolls — past that the grid would
+            // start pushing Send/Cancel off the bottom of the popover.
+            .frame(maxHeight: favoritesGridMaxHeight)
         }
-        return nil
+        .padding(.vertical, 4)
+        .padding(.horizontal, 4)
+        .background(Color.gray.opacity(0.05))
+        .cornerRadius(4)
+    }
+
+    private func favoriteThumbnail(path: String) -> some View {
+        let url = URL(fileURLWithPath: path)
+        return Button {
+            selectedLocalFolderIndex = -1 // Mark as favorite, not from current batch
+            controller.prepareBrowsedImage(url: url)
+        } label: {
+            Group {
+                if let image = loadFavoriteImage(path: path) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    // File moved or deleted since it was favorited — still show
+                    // a tile so it can be removed from the list.
+                    ZStack {
+                        Color.gray.opacity(0.2)
+                        Image(systemName: "questionmark.square.dashed")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: Self.favoriteThumbnailHeight)
+            .clipped()
+            .cornerRadius(3)
+        }
+        .buttonStyle(.plain)
+        .help(url.lastPathComponent)
+        .contextMenu {
+            Button("Open in Finder") {
+                NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
+            }
+            Button("Copy Path") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url.path, forType: .string)
+            }
+            Divider()
+            Button("Remove from Favorites", role: .destructive) {
+                settings.favoriteImagePaths.removeAll { $0 == path }
+            }
+        }
+    }
+
+    private func loadFavoriteImage(path: String) -> NSImage? {
+        if let cached = favoriteThumbnailCache.object(forKey: path as NSString) {
+            return cached
+        }
+        let url = URL(fileURLWithPath: path)
+        guard let cgImage = loadUprightCGImage(at: url, maxPixelSize: 150),
+              let thumbnail = renderLetterboxed(cgImage: cgImage, width: 150, height: 150, background: .black)
+        else { return nil }
+        favoriteThumbnailCache.setObject(thumbnail, forKey: path as NSString)
+        return thumbnail
     }
 
     private func fileInfoTooltip(for candidate: PhotoController.LocalFolderCandidate) -> String {
