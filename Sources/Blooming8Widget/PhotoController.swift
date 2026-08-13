@@ -646,6 +646,19 @@ final class PhotoController: ObservableObject {
         localFolderCandidates = []
     }
 
+    /// Loads and prepares a specific image from a file path for display/upload.
+    func prepareBrowsedImage(url: URL) {
+        guard let cgImage = loadUprightCGImage(at: url),
+              let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+              let jpeg = ImageCanvas.jpegData(framed)
+        else {
+            statusText = "Couldn't read '\(url.lastPathComponent)'."
+            return
+        }
+        localFolderCandidates = [LocalFolderCandidate(fileURL: url, image: framed, jpegData: jpeg)]
+        statusText = ""
+    }
+
     /// Uploads the approved candidate to the frame's "Random" gallery and
     /// displays it immediately. That gallery is meant to hold exactly one
     /// photo at a time, so whatever's already in it is deleted first rather

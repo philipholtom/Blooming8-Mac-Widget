@@ -89,6 +89,11 @@ final class Settings: ObservableObject {
         didSet { UserDefaults.standard.set(randomFolderPath, forKey: "randomFolderPath") }
     }
 
+    /// List of favorite image file paths marked by the user.
+    @Published var favoriteImagePaths: [String] {
+        didSet { UserDefaults.standard.set(favoriteImagePaths, forKey: "favoriteImagePaths") }
+    }
+
     init() {
         deviceIP = UserDefaults.standard.string(forKey: "deviceIP") ?? ""
         if let stored = UserDefaults.standard.stringArray(forKey: "selectedGalleries") {
@@ -144,5 +149,6 @@ final class Settings: ObservableObject {
         historyHighlightYear = UserDefaults.standard.object(forKey: "historyHighlightYear") != nil
             ? UserDefaults.standard.integer(forKey: "historyHighlightYear") : 1979
         randomFolderPath = UserDefaults.standard.string(forKey: "randomFolderPath") ?? ""
+        favoriteImagePaths = UserDefaults.standard.stringArray(forKey: "favoriteImagePaths") ?? []
     }
 }

@@ -682,9 +682,64 @@ struct ContentView: View {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(candidate.fileURL.path, forType: .string)
                         }
+                        Divider()
+                        if settings.favoriteImagePaths.contains(candidate.fileURL.path) {
+                            Button("Remove from Favorites", role: .destructive) {
+                                settings.favoriteImagePaths.removeAll { $0 == candidate.fileURL.path }
+                            }
+                        } else {
+                            Button("Add to Favorites") {
+                                if !settings.favoriteImagePaths.contains(candidate.fileURL.path) {
+                                    settings.favoriteImagePaths.append(candidate.fileURL.path)
+                                }
+                            }
+                        }
                     }
                 }
                 Spacer()
+            }
+
+            if !settings.favoriteImagePaths.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Favorites")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Clear", role: .destructive) {
+                            settings.favoriteImagePaths.removeAll()
+                        }
+                        .font(.caption2)
+                    }
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(settings.favoriteImagePaths, id: \.self) { path in
+                                if let image = loadFavoriteImage(path: path) {
+                                    Button {
+                                        selectedLocalFolderIndex = -1 // Mark as favorite, not from current batch
+                                        let url = URL(fileURLWithPath: path)
+                                        controller.prepareBrowsedImage(url: url)
+                                    } label: {
+                                        Image(nsImage: image)
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(height: 40)
+                                            .clipped()
+                                            .cornerRadius(3)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help(URL(fileURLWithPath: path).lastPathComponent)
+                                }
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 4)
+                .background(Color.gray.opacity(0.05))
+                .cornerRadius(4)
             }
 
             HStack(spacing: 8) {
@@ -734,6 +789,15 @@ struct ContentView: View {
             }
         }
         .disabled(controller.isBusy)
+    }
+
+    private func loadFavoriteImage(path: String) -> NSImage? {
+        let url = URL(fileURLWithPath: path)
+        if let cgImage = loadUprightCGImage(at: url),
+           let thumbnail = renderLetterboxed(cgImage: cgImage, width: 150, height: 150, background: .black) {
+            return thumbnail
+        }
+        return nil
     }
 
     private func fileInfoTooltip(for candidate: PhotoController.LocalFolderCandidate) -> String {
