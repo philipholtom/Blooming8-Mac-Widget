@@ -38,6 +38,7 @@ struct ContentView: View {
     @State private var newTabName: String = ""
     @State private var passwordDrafts: [UUID: String] = [:]
     @State private var selectedLocalFolderIndex: Int = 0
+    @State private var lastUploadFailed: Bool = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -644,7 +645,7 @@ struct ContentView: View {
                             )
                     }
                     .buttonStyle(.plain)
-                    .help(candidate.fileURL.path)
+                    .help(fileInfoTooltip(for: candidate))
                     .contextMenu {
                         Button("Open in Finder") {
                             NSWorkspace.shared.selectFile(candidate.fileURL.path, inFileViewerRootedAtPath: candidate.fileURL.deletingLastPathComponent().path)
@@ -660,25 +661,62 @@ struct ContentView: View {
 
             HStack(spacing: 8) {
                 Button("Cancel") {
+                    lastUploadFailed = false
                     controller.cancelLocalFolderCandidate()
                 }
                 .frame(maxWidth: .infinity)
 
                 Button("Next") {
+                    lastUploadFailed = false
+                    selectedLocalFolderIndex = 0
                     controller.prepareLocalFolderCandidate()
                 }
                 .frame(maxWidth: .infinity)
 
-                Button("Send") {
-                    if controller.localFolderCandidates.indices.contains(selectedLocalFolderIndex) {
-                        Task { await controller.confirmLocalFolderCandidate(controller.localFolderCandidates[selectedLocalFolderIndex]) }
+                if lastUploadFailed {
+                    Button("Retry") {
+                        lastUploadFailed = false
+                        if controller.localFolderCandidates.indices.contains(selectedLocalFolderIndex) {
+                            Task {
+                                await controller.confirmLocalFolderCandidate(controller.localFolderCandidates[selectedLocalFolderIndex])
+                                if controller.statusText.contains("✓") {
+                                    lastUploadFailed = false
+                                } else if controller.statusText.contains("✗") {
+                                    lastUploadFailed = true
+                                }
+                            }
+                        }
                     }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    Button("Send") {
+                        if controller.localFolderCandidates.indices.contains(selectedLocalFolderIndex) {
+                            Task {
+                                await controller.confirmLocalFolderCandidate(controller.localFolderCandidates[selectedLocalFolderIndex])
+                                if controller.statusText.contains("✗") {
+                                    lastUploadFailed = true
+                                }
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
             }
         }
         .disabled(controller.isBusy)
+    }
+
+    private func fileInfoTooltip(for candidate: PhotoController.LocalFolderCandidate) -> String {
+        let path = candidate.fileURL.path
+        let filename = candidate.fileURL.lastPathComponent
+        let format = candidate.fileURL.pathExtension.uppercased()
+        let sizeKB = Int(candidate.jpegData.count / 1024)
+        let image = candidate.image
+        let dimensions = "\(Int(image.size.width))×\(Int(image.size.height))"
+
+        return "\(filename)\n\(format) • \(sizeKB)KB • \(dimensions)\n\n\(path)"
     }
 
     private func savePhoto() {
