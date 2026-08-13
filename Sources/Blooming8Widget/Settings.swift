@@ -94,6 +94,16 @@ final class Settings: ObservableObject {
         didSet { UserDefaults.standard.set(favoriteImagePaths, forKey: "favoriteImagePaths") }
     }
 
+    /// Whether the Local Folder tab is password protected.
+    @Published var localFolderLocked: Bool {
+        didSet { UserDefaults.standard.set(localFolderLocked, forKey: "localFolderLocked") }
+    }
+
+    /// Hash of the Local Folder password (nil if not locked).
+    @Published var localFolderPasswordHash: String? {
+        didSet { UserDefaults.standard.set(localFolderPasswordHash, forKey: "localFolderPasswordHash") }
+    }
+
     init() {
         deviceIP = UserDefaults.standard.string(forKey: "deviceIP") ?? ""
         if let stored = UserDefaults.standard.stringArray(forKey: "selectedGalleries") {
@@ -150,5 +160,7 @@ final class Settings: ObservableObject {
             ? UserDefaults.standard.integer(forKey: "historyHighlightYear") : 1979
         randomFolderPath = UserDefaults.standard.string(forKey: "randomFolderPath") ?? ""
         favoriteImagePaths = UserDefaults.standard.stringArray(forKey: "favoriteImagePaths") ?? []
+        localFolderLocked = UserDefaults.standard.bool(forKey: "localFolderLocked")
+        localFolderPasswordHash = UserDefaults.standard.string(forKey: "localFolderPasswordHash")
     }
 }

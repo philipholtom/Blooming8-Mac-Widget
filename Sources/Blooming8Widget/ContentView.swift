@@ -40,6 +40,10 @@ struct ContentView: View {
     @State private var selectedLocalFolderIndex: Int = 0
     @State private var lastUploadFailed: Bool = false
     @State private var showSuccessBadge: Bool = false
+    @State private var localFolderPasswordDraft: String = ""
+    @State private var localFolderPasswordError: Bool = false
+    @State private var localFolderUnlocked: Bool = false
+    @State private var showLocalFolderPasswordSetup: Bool = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -840,7 +844,11 @@ struct ContentView: View {
             case .generated:
                 contentSourceChecklist
             case .localFolder:
-                localFolderSection
+                if settings.localFolderLocked && !localFolderUnlocked {
+                    localFolderPasswordPrompt
+                } else {
+                    localFolderSection
+                }
             case .gallery:
                 if let tab = activeGalleryTab, tab.isLocked, !controller.unlockedTabIDs.contains(tab.id) {
                     lockedTabPrompt(tab: tab)
@@ -900,6 +908,72 @@ struct ContentView: View {
 
     // MARK: - Local folder
 
+    private var localFolderPasswordPrompt: some View {
+        VStack(spacing: 8) {
+            Text("Local Folder is Locked")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            SecureField("Password", text: $localFolderPasswordDraft)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    attemptLocalFolderUnlock()
+                }
+            if localFolderPasswordError {
+                Text("Incorrect password.")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+            Button("Unlock") {
+                attemptLocalFolderUnlock()
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(localFolderPasswordDraft.isEmpty)
+        }
+    }
+
+    private func attemptLocalFolderUnlock() {
+        if let hash = settings.localFolderPasswordHash,
+           PasswordHasher.hash(localFolderPasswordDraft) == hash {
+            localFolderPasswordError = false
+            localFolderPasswordDraft = ""
+            localFolderUnlocked = true
+        } else {
+            localFolderPasswordError = true
+        }
+    }
+
+    private var localFolderPasswordSetupSheet: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("Set Local Folder Password")
+                    .font(.headline)
+                Spacer()
+                Button("Close") { showLocalFolderPasswordSetup = false }
+            }
+            .padding()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Set a password to protect the Local Folder tab:")
+                    .font(.caption)
+                SecureField("Password", text: $localFolderPasswordDraft)
+                    .textFieldStyle(.roundedBorder)
+                Button("Set Password") {
+                    if !localFolderPasswordDraft.isEmpty {
+                        settings.localFolderPasswordHash = PasswordHasher.hash(localFolderPasswordDraft)
+                        settings.localFolderLocked = true
+                        localFolderPasswordDraft = ""
+                        showLocalFolderPasswordSetup = false
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(localFolderPasswordDraft.isEmpty)
+            }
+            .padding()
+
+            Spacer()
+        }
+    }
+
     private var localFolderSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Local Folder")
@@ -925,9 +999,29 @@ struct ContentView: View {
                 .font(.caption)
                 Spacer()
             }
+            HStack {
+                if settings.localFolderLocked {
+                    Button("Unlock Folder") {
+                        settings.localFolderLocked = false
+                        settings.localFolderPasswordHash = nil
+                        localFolderUnlocked = false
+                        localFolderPasswordDraft = ""
+                    }
+                    .font(.caption)
+                } else {
+                    Button("Lock Folder") {
+                        showLocalFolderPasswordSetup = true
+                    }
+                    .font(.caption)
+                }
+                Spacer()
+            }
             Text("When you pick a random photo, you'll see 3 options to choose from.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            .sheet(isPresented: $showLocalFolderPasswordSetup) {
+                localFolderPasswordSetupSheet
+            }
         }
     }
 
@@ -968,6 +1062,9 @@ struct ContentView: View {
             activeSelection = selection
             unlockPasswordDraft = ""
             unlockError = false
+            localFolderPasswordDraft = ""
+            localFolderPasswordError = false
+            localFolderUnlocked = false
             controller.cancelLocalFolderCandidate()
         } label: {
             HStack(spacing: 4) {
