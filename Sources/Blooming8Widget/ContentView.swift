@@ -44,6 +44,7 @@ struct ContentView: View {
     @State private var localFolderPasswordError: Bool = false
     @State private var localFolderUnlocked: Bool = false
     @State private var showLocalFolderPasswordSetup: Bool = false
+    @State private var showLocalFolderTab: Bool = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -832,7 +833,7 @@ struct ContentView: View {
         case .generated:
             return settings.selectedContentSources.isEmpty
         case .localFolder:
-            return settings.randomFolderPath.trimmingCharacters(in: .whitespaces).isEmpty
+            return settings.randomFolderPath.trimmingCharacters(in: .whitespaces).isEmpty || (settings.localFolderLocked && !localFolderUnlocked)
         }
     }
 
@@ -1039,7 +1040,9 @@ struct ContentView: View {
                     )
                 }
                 tabChip(name: "✨ Generated", selection: .generated, isLocked: false)
-                tabChip(name: "📁 Folder", selection: .localFolder, isLocked: false)
+                if !settings.localFolderLocked || showLocalFolderTab {
+                    tabChip(name: "📁 Folder", selection: .localFolder, isLocked: false)
+                }
             }
         }
     }
@@ -1048,10 +1051,21 @@ struct ContentView: View {
     /// locked tabs in the bar above without a visible control anyone could
     /// stumble onto.
     private var revealHiddenTabsShortcut: some View {
-        Button("") {
-            controller.showHiddenTabs.toggle()
+        ZStack {
+            Button("") {
+                controller.showHiddenTabs.toggle()
+            }
+            .keyboardShortcut("l", modifiers: [.command, .shift])
+
+            Button("") {
+                if settings.localFolderLocked {
+                    showLocalFolderTab.toggle()
+                } else {
+                    activeSelection = .localFolder
+                }
+            }
+            .keyboardShortcut("l", modifiers: [.command, .option])
         }
-        .keyboardShortcut("l", modifiers: [.command, .shift])
         .frame(width: 0, height: 0)
         .opacity(0)
         .accessibilityHidden(true)
