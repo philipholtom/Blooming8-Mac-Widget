@@ -44,7 +44,6 @@ struct ContentView: View {
     @State private var localFolderPasswordError: Bool = false
     @State private var localFolderUnlocked: Bool = false
     @State private var showLocalFolderPasswordSetup: Bool = false
-    @State private var showLocalFolderTab: Bool = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -1040,32 +1039,33 @@ struct ContentView: View {
                     )
                 }
                 tabChip(name: "✨ Generated", selection: .generated, isLocked: false)
-                if !settings.localFolderLocked || showLocalFolderTab {
-                    tabChip(name: "📁 Folder", selection: .localFolder, isLocked: false)
+                if !settings.localFolderLocked || controller.showHiddenTabs {
+                    tabChip(
+                        name: "📁 Folder",
+                        selection: .localFolder,
+                        isLocked: settings.localFolderLocked && !localFolderUnlocked
+                    )
                 }
             }
         }
     }
 
     /// Invisible — exists purely to register the ⌘⇧L shortcut that reveals
-    /// locked tabs in the bar above without a visible control anyone could
-    /// stumble onto.
+    /// every hidden tab (locked gallery tabs and the locked Local Folder tab)
+    /// without a visible control anyone could stumble onto.
     private var revealHiddenTabsShortcut: some View {
-        ZStack {
-            Button("") {
-                controller.showHiddenTabs.toggle()
+        Button("") {
+            controller.showHiddenTabs.toggle()
+            // Hiding the tabs again shouldn't leave a now-invisible one selected.
+            if !controller.showHiddenTabs, settings.localFolderLocked, activeSelection == .localFolder {
+                activeSelection = .gallery(nil)
+                localFolderUnlocked = false
+                localFolderPasswordDraft = ""
+                localFolderPasswordError = false
+                controller.cancelLocalFolderCandidate()
             }
-            .keyboardShortcut("l", modifiers: [.command, .shift])
-
-            Button("") {
-                if settings.localFolderLocked {
-                    showLocalFolderTab.toggle()
-                } else {
-                    activeSelection = .localFolder
-                }
-            }
-            .keyboardShortcut("l", modifiers: [.command, .option])
         }
+        .keyboardShortcut("l", modifiers: [.command, .shift])
         .frame(width: 0, height: 0)
         .opacity(0)
         .accessibilityHidden(true)
