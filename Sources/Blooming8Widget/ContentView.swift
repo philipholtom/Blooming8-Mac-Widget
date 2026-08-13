@@ -881,7 +881,7 @@ struct ContentView: View {
                     )
                 }
                 tabChip(name: "✨ Generated", selection: .generated, isLocked: false)
-                tabChip(name: "📁 Local Folder", selection: .localFolder, isLocked: false)
+                tabChip(name: "📁 Folder", selection: .localFolder, isLocked: false)
             }
         }
     }
