@@ -39,6 +39,7 @@ struct ContentView: View {
     @State private var passwordDrafts: [UUID: String] = [:]
     @State private var selectedLocalFolderIndex: Int = 0
     @State private var lastUploadFailed: Bool = false
+    @State private var showSuccessBadge: Bool = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -46,7 +47,7 @@ struct ContentView: View {
 
             header
 
-            ZStack {
+            ZStack(alignment: .center) {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(Color.gray.opacity(0.15))
                 let previewImage = controller.localFolderCandidates.indices.contains(selectedLocalFolderIndex)
@@ -62,8 +63,35 @@ struct ContentView: View {
                         .font(.system(size: 40))
                         .foregroundStyle(.secondary)
                 }
+
+                if showSuccessBadge {
+                    VStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.green)
+                        Text("Uploaded!")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
+                    .padding(12)
+                    .background(Color.white.opacity(0.95))
+                    .cornerRadius(8)
+                    .transition(.scale.combined(with: .opacity))
+                }
             }
             .frame(height: 220)
+            .onChange(of: controller.statusText) { text in
+                if text.contains("✓ Displayed") {
+                    showSuccessBadge = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        withAnimation {
+                            showSuccessBadge = false
+                        }
+                    }
+                } else if text.contains("✗") {
+                    showSuccessBadge = false
+                }
+            }
 
             if !controller.localFolderCandidates.isEmpty {
                 Text("Pick one of 3")
