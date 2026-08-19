@@ -5,10 +5,10 @@ import AppKit
 /// (no direct Swift/Apple-framework equivalent); this hand-rolls the
 /// standard age/synodic-month approximation instead, accurate to well
 /// within a day, which is plenty for a decorative display.
-struct MoonPhaseSource: ContentSource {
-    let id = "moon"
-    let displayName = "Moon Phase"
-    let galleryName = "Moon Phase"
+public struct MoonPhaseSource: ContentSource {
+    public let id = "moon"
+    public let displayName = "Moon Phase"
+    public let galleryName = "Moon Phase"
 
     private let width = 1200
     private let height = 1600
@@ -22,7 +22,7 @@ struct MoonPhaseSource: ContentSource {
         let daysToNew: Int
     }
 
-    func generateImage(settings: Settings) async throws -> Data {
+    public func generateImage(settings: AppSettings) async throws -> Data {
         let phase = calculatePhase()
         guard let image = renderArt(phase: phase), let jpeg = ImageCanvas.jpegData(image) else {
             throw ContentSourceError.message("Couldn't render moon phase image")

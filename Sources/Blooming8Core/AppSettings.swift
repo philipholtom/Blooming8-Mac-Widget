@@ -1,13 +1,13 @@
 import Foundation
 import Combine
 
-enum RandomWeighting: String, CaseIterable, Identifiable {
+public enum RandomWeighting: String, CaseIterable, Identifiable {
     case perPhoto
     case perGallery
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var label: String {
+    public var label: String {
         switch self {
         case .perPhoto: return "Photo"
         case .perGallery: return "Gallery"
@@ -15,13 +15,13 @@ enum RandomWeighting: String, CaseIterable, Identifiable {
     }
 }
 
-enum AutoRandomInterval: String, CaseIterable, Identifiable {
+public enum AutoRandomInterval: String, CaseIterable, Identifiable {
     case hourly
     case daily
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var label: String {
+    public var label: String {
         switch self {
         case .hourly: return "Every Hour"
         case .daily: return "Daily"
@@ -29,82 +29,82 @@ enum AutoRandomInterval: String, CaseIterable, Identifiable {
     }
 }
 
-final class Settings: ObservableObject {
-    @Published var deviceIP: String {
+public final class AppSettings: ObservableObject {
+    @Published public var deviceIP: String {
         didSet { UserDefaults.standard.set(deviceIP, forKey: "deviceIP") }
     }
-    @Published var selectedGalleries: Set<String> {
+    @Published public var selectedGalleries: Set<String> {
         didSet { UserDefaults.standard.set(Array(selectedGalleries), forKey: "selectedGalleries") }
     }
-    @Published var randomWeighting: RandomWeighting {
+    @Published public var randomWeighting: RandomWeighting {
         didSet { UserDefaults.standard.set(randomWeighting.rawValue, forKey: "randomWeighting") }
     }
-    @Published var bleDeviceName: String {
+    @Published public var bleDeviceName: String {
         didSet { UserDefaults.standard.set(bleDeviceName, forKey: "bleDeviceName") }
     }
-    @Published var tabs: [GalleryTab] {
+    @Published public var tabs: [GalleryTab] {
         didSet {
             if let data = try? JSONEncoder().encode(tabs) {
                 UserDefaults.standard.set(data, forKey: "galleryTabs")
             }
         }
     }
-    @Published var autoRandomEnabled: Bool {
+    @Published public var autoRandomEnabled: Bool {
         didSet { UserDefaults.standard.set(autoRandomEnabled, forKey: "autoRandomEnabled") }
     }
-    @Published var autoRandomInterval: AutoRandomInterval {
+    @Published public var autoRandomInterval: AutoRandomInterval {
         didSet { UserDefaults.standard.set(autoRandomInterval.rawValue, forKey: "autoRandomInterval") }
     }
     /// Minutes since midnight (local time), only used when autoRandomInterval == .daily.
-    @Published var autoRandomDailyMinute: Int {
+    @Published public var autoRandomDailyMinute: Int {
         didSet { UserDefaults.standard.set(autoRandomDailyMinute, forKey: "autoRandomDailyMinute") }
     }
     /// NASA APOD API key. Defaults to NASA's public shared demo key (rate-limited);
     /// stored locally only, never committed to the repo.
-    @Published var nasaApiKey: String {
+    @Published public var nasaApiKey: String {
         didSet { UserDefaults.standard.set(nasaApiKey, forKey: "nasaApiKey") }
     }
-    @Published var selectedContentSources: Set<String> {
+    @Published public var selectedContentSources: Set<String> {
         didSet { UserDefaults.standard.set(Array(selectedContentSources), forKey: "selectedContentSources") }
     }
-    @Published var weatherLocationName: String {
+    @Published public var weatherLocationName: String {
         didSet { UserDefaults.standard.set(weatherLocationName, forKey: "weatherLocationName") }
     }
-    @Published var weatherLatitude: Double {
+    @Published public var weatherLatitude: Double {
         didSet { UserDefaults.standard.set(weatherLatitude, forKey: "weatherLatitude") }
     }
-    @Published var weatherLongitude: Double {
+    @Published public var weatherLongitude: Double {
         didSet { UserDefaults.standard.set(weatherLongitude, forKey: "weatherLongitude") }
     }
     /// The year format_history_text/create_history_art always surfaces first
     /// if present — a personal touch from the original script (likely a
     /// birth year), kept configurable rather than silently hardcoded.
-    @Published var historyHighlightYear: Int {
+    @Published public var historyHighlightYear: Int {
         didSet { UserDefaults.standard.set(historyHighlightYear, forKey: "historyHighlightYear") }
     }
     /// A folder on this Mac to pick random photos from for the "Local Folder"
     /// tab. Stored as a plain path — the app isn't sandboxed, so no
     /// security-scoped bookmark is needed to keep reading it after relaunch.
-    @Published var randomFolderPath: String {
+    @Published public var randomFolderPath: String {
         didSet { UserDefaults.standard.set(randomFolderPath, forKey: "randomFolderPath") }
     }
 
     /// List of favorite image file paths marked by the user.
-    @Published var favoriteImagePaths: [String] {
+    @Published public var favoriteImagePaths: [String] {
         didSet { UserDefaults.standard.set(favoriteImagePaths, forKey: "favoriteImagePaths") }
     }
 
     /// Whether the Local Folder tab is password protected.
-    @Published var localFolderLocked: Bool {
+    @Published public var localFolderLocked: Bool {
         didSet { UserDefaults.standard.set(localFolderLocked, forKey: "localFolderLocked") }
     }
 
     /// Hash of the Local Folder password (nil if not locked).
-    @Published var localFolderPasswordHash: String? {
+    @Published public var localFolderPasswordHash: String? {
         didSet { UserDefaults.standard.set(localFolderPasswordHash, forKey: "localFolderPasswordHash") }
     }
 
-    init() {
+    public init() {
         deviceIP = UserDefaults.standard.string(forKey: "deviceIP") ?? ""
         if let stored = UserDefaults.standard.stringArray(forKey: "selectedGalleries") {
             selectedGalleries = Set(stored)

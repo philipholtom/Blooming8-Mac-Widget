@@ -5,8 +5,8 @@ import UniformTypeIdentifiers
 /// destination folder to download into. The app isn't sandboxed, so no
 /// security-scoped bookmarks are needed — the panel itself is just the UX
 /// for getting file URLs from the user.
-enum FilePicker {
-    static func chooseImages() -> [URL] {
+public enum FilePicker {
+    public static func chooseImages() -> [URL] {
         let panel = NSOpenPanel()
         panel.title = "Choose Photos to Upload"
         panel.allowsMultipleSelection = true
@@ -16,7 +16,7 @@ enum FilePicker {
         return panel.runModal() == .OK ? panel.urls : []
     }
 
-    static func chooseFolder(title: String = "Choose a Folder to Save Photos Into") -> URL? {
+    public static func chooseFolder(title: String = "Choose a Folder to Save Photos Into") -> URL? {
         let panel = NSOpenPanel()
         panel.title = title
         panel.canChooseDirectories = true

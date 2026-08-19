@@ -16,7 +16,7 @@ import os
 ///
 ///     log stream --predicate 'subsystem == "com.pholtom.blooming8widget"'
 @MainActor
-final class BLEWaker: NSObject {
+public final class BLEWaker: NSObject {
     private static let log = Logger(subsystem: "com.pholtom.blooming8widget", category: "ble")
 
     /// The wake pulse goes only to 0xF001 (in the 0xF000 service). The frame
@@ -46,7 +46,7 @@ final class BLEWaker: NSObject {
     /// a wake pulse to its known characteristic. Returns true once the pulse was
     /// sent — not a guarantee the frame actually woke, just that the BLE side of
     /// things succeeded.
-    func wake(deviceName: String, scanTimeout: TimeInterval = 20) async -> Bool {
+    public func wake(deviceName: String, scanTimeout: TimeInterval = 20) async -> Bool {
         guard continuation == nil else {
             Self.log.error("wake: ignored, a wake is already in progress")
             return false
@@ -127,7 +127,7 @@ final class BLEWaker: NSObject {
 }
 
 extension BLEWaker: @MainActor CBCentralManagerDelegate {
-    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+    public func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
             Self.log.notice("central: poweredOn, scanning")
@@ -146,7 +146,7 @@ extension BLEWaker: @MainActor CBCentralManagerDelegate {
         }
     }
 
-    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
+    public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
         let advertisedName = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name
         if let seen = advertisedName, !loggedNames.contains(seen) {
             loggedNames.insert(seen)
@@ -165,24 +165,24 @@ extension BLEWaker: @MainActor CBCentralManagerDelegate {
         central.connect(peripheral, options: nil)
     }
 
-    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+    public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         Self.log.notice("connect: ok, discovering services")
         peripheral.discoverServices(nil)
     }
 
-    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+    public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         Self.log.error("connect: failed — \(error?.localizedDescription ?? "unknown", privacy: .public)")
         finish(false)
     }
 
-    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+    public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         Self.log.notice("disconnect: pulsed=\(self.didPulseCharacteristic) err=\(error?.localizedDescription ?? "none", privacy: .public)")
         finish(didPulseCharacteristic)
     }
 }
 
 extension BLEWaker: @MainActor CBPeripheralDelegate {
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+    public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard error == nil, let services = peripheral.services, !services.isEmpty else {
             Self.log.error("services: discovery failed — \(error?.localizedDescription ?? "no services", privacy: .public)")
             finish(false)
@@ -196,7 +196,7 @@ extension BLEWaker: @MainActor CBPeripheralDelegate {
         }
     }
 
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+    public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         pendingServices -= 1
         guard error == nil, let characteristics = service.characteristics else {
             Self.log.error("chars: \(service.uuid.uuidString, privacy: .public) failed — \(error?.localizedDescription ?? "none", privacy: .public)")

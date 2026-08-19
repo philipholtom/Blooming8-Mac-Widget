@@ -3,10 +3,10 @@ import AppKit
 /// Historical events for today's date, rendered as a vintage-style text
 /// card. Ported from history_on_this_day.py, using the Wikimedia REST
 /// "on this day" feed (free, no key, just a descriptive User-Agent).
-struct HistorySource: ContentSource {
-    let id = "history"
-    let displayName = "History on This Day"
-    let galleryName = "History"
+public struct HistorySource: ContentSource {
+    public let id = "history"
+    public let displayName = "History on This Day"
+    public let galleryName = "History"
 
     private let width = 1200
     private let height = 1600
@@ -40,7 +40,7 @@ struct HistorySource: ContentSource {
         let events: [WikimediaEvent]
     }
 
-    func generateImage(settings: Settings) async throws -> Data {
+    public func generateImage(settings: AppSettings) async throws -> Data {
         let events = try await fetchEvents(highlightYear: settings.historyHighlightYear)
         guard let image = renderArt(events: events), let jpeg = ImageCanvas.jpegData(image) else {
             throw ContentSourceError.message("Couldn't render history image")

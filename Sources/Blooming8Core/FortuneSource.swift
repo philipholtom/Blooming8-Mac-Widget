@@ -4,10 +4,10 @@ import AppKit
 /// the Unix `fortune` command first (if installed via Homebrew, matching
 /// fortune_art_uploader.py), falling back to a bundled quote list so this
 /// works out of the box without any extra install.
-struct FortuneSource: ContentSource {
-    let id = "fortune"
-    let displayName = "Fortune"
-    let galleryName = "Fortune"
+public struct FortuneSource: ContentSource {
+    public let id = "fortune"
+    public let displayName = "Fortune"
+    public let galleryName = "Fortune"
 
     private let width = 1200
     private let height = 1600
@@ -89,7 +89,7 @@ struct FortuneSource: ContentSource {
         "Good things come to those who hustle.",
     ]
 
-    func generateImage(settings: Settings) async throws -> Data {
+    public func generateImage(settings: AppSettings) async throws -> Data {
         let quote = await fetchFortune()
         guard let image = renderArt(quote: quote), let jpeg = ImageCanvas.jpegData(image) else {
             throw ContentSourceError.message("Couldn't render fortune image")

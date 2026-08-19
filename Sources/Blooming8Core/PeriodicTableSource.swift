@@ -3,10 +3,10 @@ import AppKit
 /// A random periodic table element, with a representative photo fetched
 /// from Wikimedia Commons where one can be found. Ported from
 /// periodic_table_uploader.py.
-struct PeriodicTableSource: ContentSource {
-    let id = "periodicTable"
-    let displayName = "Periodic Table"
-    let galleryName = "Periodic Table"
+public struct PeriodicTableSource: ContentSource {
+    public let id = "periodicTable"
+    public let displayName = "Periodic Table"
+    public let galleryName = "Periodic Table"
 
     private let width = 1200
     private let height = 1600
@@ -49,7 +49,7 @@ struct PeriodicTableSource: ContentSource {
         let query: Query
     }
 
-    func generateImage(settings: Settings) async throws -> Data {
+    public func generateImage(settings: AppSettings) async throws -> Data {
         guard let element = PeriodicElements.all.randomElement() else {
             throw ContentSourceError.message("No elements available")
         }

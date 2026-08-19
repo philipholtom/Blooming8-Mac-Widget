@@ -1,17 +1,17 @@
 import Foundation
 
-struct PeriodicElement {
-    let name: String
-    let symbol: String
-    let atomicNumber: Int
-    let atomicWeight: String
-    let facts: String
+public struct PeriodicElement {
+    public let name: String
+    public let symbol: String
+    public let atomicNumber: Int
+    public let atomicWeight: String
+    public let facts: String
 }
 
 /// Transcribed from periodic_table_uploader.py's ELEMENTS table. Electron
 /// configuration is omitted — the original script never actually renders it.
-enum PeriodicElements {
-    static let all: [PeriodicElement] = [
+public enum PeriodicElements {
+    public static let all: [PeriodicElement] = [
         PeriodicElement(name: "Hydrogen", symbol: "H", atomicNumber: 1, atomicWeight: "1.008", facts: "Most abundant element in the universe. Makes up 75% of all normal matter. Essential for life."),
         PeriodicElement(name: "Helium", symbol: "He", atomicNumber: 2, atomicWeight: "4.003", facts: "Second most abundant element. Has lowest melting point. Used in balloons and diving."),
         PeriodicElement(name: "Lithium", symbol: "Li", atomicNumber: 3, atomicWeight: "6.941", facts: "Lightest metal. Used in batteries and psychiatric medications. Highly reactive."),

@@ -6,24 +6,24 @@ import CryptoKit
 /// anyone on the LAN can still bypass it with a direct request. It just keeps
 /// someone casually clicking through the menu bar (a kid, a houseguest) out
 /// of galleries you've grouped away.
-struct GalleryTab: Identifiable, Codable, Equatable {
-    var id: UUID
-    var name: String
-    var galleryNames: Set<String>
-    var passwordHash: String?
+public struct GalleryTab: Identifiable, Codable, Equatable {
+    public var id: UUID
+    public var name: String
+    public var galleryNames: Set<String>
+    public var passwordHash: String?
 
-    init(id: UUID = UUID(), name: String, galleryNames: Set<String> = [], passwordHash: String? = nil) {
+    public init(id: UUID = UUID(), name: String, galleryNames: Set<String> = [], passwordHash: String? = nil) {
         self.id = id
         self.name = name
         self.galleryNames = galleryNames
         self.passwordHash = passwordHash
     }
 
-    var isLocked: Bool { passwordHash != nil }
+    public var isLocked: Bool { passwordHash != nil }
 }
 
-enum PasswordHasher {
-    static func hash(_ password: String) -> String {
+public enum PasswordHasher {
+    public static func hash(_ password: String) -> String {
         SHA256.hash(data: Data(password.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }
