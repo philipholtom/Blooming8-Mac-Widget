@@ -30,91 +30,110 @@ public enum AutoRandomInterval: String, CaseIterable, Identifiable {
 }
 
 public final class AppSettings: ObservableObject {
+    /// Both products read and write one store, so the frame IP, tabs,
+    /// favorites and passwords stay in sync no matter which one you configure.
+    ///
+    /// A plain suite name rather than a `group.*` App Group: real App Groups
+    /// need the `com.apple.security.application-groups` entitlement, which in
+    /// turn needs a Developer ID signing identity. Neither product is
+    /// sandboxed, so a shared suite lands in
+    /// ~/Library/Preferences/com.pholtom.blooming8.shared.plist and is
+    /// readable by both without any entitlement.
+    public static let suiteName = "com.pholtom.blooming8.shared"
+
+    private let defaults: UserDefaults
+
     @Published public var deviceIP: String {
-        didSet { UserDefaults.standard.set(deviceIP, forKey: "deviceIP") }
+        didSet { defaults.set(deviceIP, forKey: "deviceIP") }
     }
     @Published public var selectedGalleries: Set<String> {
-        didSet { UserDefaults.standard.set(Array(selectedGalleries), forKey: "selectedGalleries") }
+        didSet { defaults.set(Array(selectedGalleries), forKey: "selectedGalleries") }
     }
     @Published public var randomWeighting: RandomWeighting {
-        didSet { UserDefaults.standard.set(randomWeighting.rawValue, forKey: "randomWeighting") }
+        didSet { defaults.set(randomWeighting.rawValue, forKey: "randomWeighting") }
     }
     @Published public var bleDeviceName: String {
-        didSet { UserDefaults.standard.set(bleDeviceName, forKey: "bleDeviceName") }
+        didSet { defaults.set(bleDeviceName, forKey: "bleDeviceName") }
     }
     @Published public var tabs: [GalleryTab] {
         didSet {
             if let data = try? JSONEncoder().encode(tabs) {
-                UserDefaults.standard.set(data, forKey: "galleryTabs")
+                defaults.set(data, forKey: "galleryTabs")
             }
         }
     }
     @Published public var autoRandomEnabled: Bool {
-        didSet { UserDefaults.standard.set(autoRandomEnabled, forKey: "autoRandomEnabled") }
+        didSet { defaults.set(autoRandomEnabled, forKey: "autoRandomEnabled") }
     }
     @Published public var autoRandomInterval: AutoRandomInterval {
-        didSet { UserDefaults.standard.set(autoRandomInterval.rawValue, forKey: "autoRandomInterval") }
+        didSet { defaults.set(autoRandomInterval.rawValue, forKey: "autoRandomInterval") }
     }
     /// Minutes since midnight (local time), only used when autoRandomInterval == .daily.
     @Published public var autoRandomDailyMinute: Int {
-        didSet { UserDefaults.standard.set(autoRandomDailyMinute, forKey: "autoRandomDailyMinute") }
+        didSet { defaults.set(autoRandomDailyMinute, forKey: "autoRandomDailyMinute") }
     }
     /// NASA APOD API key. Defaults to NASA's public shared demo key (rate-limited);
     /// stored locally only, never committed to the repo.
     @Published public var nasaApiKey: String {
-        didSet { UserDefaults.standard.set(nasaApiKey, forKey: "nasaApiKey") }
+        didSet { defaults.set(nasaApiKey, forKey: "nasaApiKey") }
     }
     @Published public var selectedContentSources: Set<String> {
-        didSet { UserDefaults.standard.set(Array(selectedContentSources), forKey: "selectedContentSources") }
+        didSet { defaults.set(Array(selectedContentSources), forKey: "selectedContentSources") }
     }
     @Published public var weatherLocationName: String {
-        didSet { UserDefaults.standard.set(weatherLocationName, forKey: "weatherLocationName") }
+        didSet { defaults.set(weatherLocationName, forKey: "weatherLocationName") }
     }
     @Published public var weatherLatitude: Double {
-        didSet { UserDefaults.standard.set(weatherLatitude, forKey: "weatherLatitude") }
+        didSet { defaults.set(weatherLatitude, forKey: "weatherLatitude") }
     }
     @Published public var weatherLongitude: Double {
-        didSet { UserDefaults.standard.set(weatherLongitude, forKey: "weatherLongitude") }
+        didSet { defaults.set(weatherLongitude, forKey: "weatherLongitude") }
     }
     /// The year format_history_text/create_history_art always surfaces first
     /// if present — a personal touch from the original script (likely a
     /// birth year), kept configurable rather than silently hardcoded.
     @Published public var historyHighlightYear: Int {
-        didSet { UserDefaults.standard.set(historyHighlightYear, forKey: "historyHighlightYear") }
+        didSet { defaults.set(historyHighlightYear, forKey: "historyHighlightYear") }
     }
     /// A folder on this Mac to pick random photos from for the "Local Folder"
     /// tab. Stored as a plain path — the app isn't sandboxed, so no
     /// security-scoped bookmark is needed to keep reading it after relaunch.
     @Published public var randomFolderPath: String {
-        didSet { UserDefaults.standard.set(randomFolderPath, forKey: "randomFolderPath") }
+        didSet { defaults.set(randomFolderPath, forKey: "randomFolderPath") }
     }
 
     /// List of favorite image file paths marked by the user.
     @Published public var favoriteImagePaths: [String] {
-        didSet { UserDefaults.standard.set(favoriteImagePaths, forKey: "favoriteImagePaths") }
+        didSet { defaults.set(favoriteImagePaths, forKey: "favoriteImagePaths") }
     }
 
     /// Whether the Local Folder tab is password protected.
     @Published public var localFolderLocked: Bool {
-        didSet { UserDefaults.standard.set(localFolderLocked, forKey: "localFolderLocked") }
+        didSet { defaults.set(localFolderLocked, forKey: "localFolderLocked") }
     }
 
     /// Hash of the Local Folder password (nil if not locked).
     @Published public var localFolderPasswordHash: String? {
-        didSet { UserDefaults.standard.set(localFolderPasswordHash, forKey: "localFolderPasswordHash") }
+        didSet { defaults.set(localFolderPasswordHash, forKey: "localFolderPasswordHash") }
     }
 
-    public init() {
-        deviceIP = UserDefaults.standard.string(forKey: "deviceIP") ?? ""
-        if let stored = UserDefaults.standard.stringArray(forKey: "selectedGalleries") {
+    public convenience init() {
+        self.init(defaults: UserDefaults(suiteName: AppSettings.suiteName) ?? .standard)
+    }
+
+    public init(defaults: UserDefaults) {
+        self.defaults = defaults
+        AppSettings.migrateLegacyDefaultsIfNeeded(into: defaults)
+        deviceIP = defaults.string(forKey: "deviceIP") ?? ""
+        if let stored = defaults.stringArray(forKey: "selectedGalleries") {
             selectedGalleries = Set(stored)
-        } else if let legacy = UserDefaults.standard.string(forKey: "selectedGallery"), !legacy.isEmpty {
+        } else if let legacy = defaults.string(forKey: "selectedGallery"), !legacy.isEmpty {
             // Migrate from the old single-gallery setting.
             selectedGalleries = [legacy]
         } else {
             selectedGalleries = []
         }
-        if let raw = UserDefaults.standard.string(forKey: "randomWeighting"),
+        if let raw = defaults.string(forKey: "randomWeighting"),
            let weighting = RandomWeighting(rawValue: raw) {
             randomWeighting = weighting
         } else {
@@ -122,45 +141,69 @@ public final class AppSettings: ObservableObject {
         }
         // Defaults to "Office" — the BLE name your existing NASA APOD Frame
         // script uses to wake this same frame (same IP, confirmed working).
-        bleDeviceName = UserDefaults.standard.string(forKey: "bleDeviceName") ?? "Office"
+        bleDeviceName = defaults.string(forKey: "bleDeviceName") ?? "Office"
 
-        if let data = UserDefaults.standard.data(forKey: "galleryTabs"),
+        if let data = defaults.data(forKey: "galleryTabs"),
            let decoded = try? JSONDecoder().decode([GalleryTab].self, from: data) {
             tabs = decoded
         } else {
             tabs = []
         }
 
-        autoRandomEnabled = UserDefaults.standard.bool(forKey: "autoRandomEnabled")
-        if let raw = UserDefaults.standard.string(forKey: "autoRandomInterval"),
+        autoRandomEnabled = defaults.bool(forKey: "autoRandomEnabled")
+        if let raw = defaults.string(forKey: "autoRandomInterval"),
            let interval = AutoRandomInterval(rawValue: raw) {
             autoRandomInterval = interval
         } else {
             autoRandomInterval = .hourly
         }
-        if UserDefaults.standard.object(forKey: "autoRandomDailyMinute") != nil {
-            autoRandomDailyMinute = UserDefaults.standard.integer(forKey: "autoRandomDailyMinute")
+        if defaults.object(forKey: "autoRandomDailyMinute") != nil {
+            autoRandomDailyMinute = defaults.integer(forKey: "autoRandomDailyMinute")
         } else {
             autoRandomDailyMinute = 9 * 60 // 9:00 AM default
         }
 
-        nasaApiKey = UserDefaults.standard.string(forKey: "nasaApiKey") ?? "DEMO_KEY"
-        if let stored = UserDefaults.standard.stringArray(forKey: "selectedContentSources") {
+        nasaApiKey = defaults.string(forKey: "nasaApiKey") ?? "DEMO_KEY"
+        if let stored = defaults.stringArray(forKey: "selectedContentSources") {
             selectedContentSources = Set(stored)
         } else {
             selectedContentSources = []
         }
 
-        weatherLocationName = UserDefaults.standard.string(forKey: "weatherLocationName") ?? ""
-        weatherLatitude = UserDefaults.standard.object(forKey: "weatherLatitude") != nil
-            ? UserDefaults.standard.double(forKey: "weatherLatitude") : 0
-        weatherLongitude = UserDefaults.standard.object(forKey: "weatherLongitude") != nil
-            ? UserDefaults.standard.double(forKey: "weatherLongitude") : 0
-        historyHighlightYear = UserDefaults.standard.object(forKey: "historyHighlightYear") != nil
-            ? UserDefaults.standard.integer(forKey: "historyHighlightYear") : 1979
-        randomFolderPath = UserDefaults.standard.string(forKey: "randomFolderPath") ?? ""
-        favoriteImagePaths = UserDefaults.standard.stringArray(forKey: "favoriteImagePaths") ?? []
-        localFolderLocked = UserDefaults.standard.bool(forKey: "localFolderLocked")
-        localFolderPasswordHash = UserDefaults.standard.string(forKey: "localFolderPasswordHash")
+        weatherLocationName = defaults.string(forKey: "weatherLocationName") ?? ""
+        weatherLatitude = defaults.object(forKey: "weatherLatitude") != nil
+            ? defaults.double(forKey: "weatherLatitude") : 0
+        weatherLongitude = defaults.object(forKey: "weatherLongitude") != nil
+            ? defaults.double(forKey: "weatherLongitude") : 0
+        historyHighlightYear = defaults.object(forKey: "historyHighlightYear") != nil
+            ? defaults.integer(forKey: "historyHighlightYear") : 1979
+        randomFolderPath = defaults.string(forKey: "randomFolderPath") ?? ""
+        favoriteImagePaths = defaults.stringArray(forKey: "favoriteImagePaths") ?? []
+        localFolderLocked = defaults.bool(forKey: "localFolderLocked")
+        localFolderPasswordHash = defaults.string(forKey: "localFolderPasswordHash")
+    }
+
+    /// The widget stored everything in the standard domain before the app
+    /// existed. Copy that across on first run against the shared suite so an
+    /// existing install doesn't come back up with a blank frame IP, no tabs
+    /// and no favorites.
+    private static func migrateLegacyDefaultsIfNeeded(into defaults: UserDefaults) {
+        let marker = "didMigrateLegacyDefaults"
+        guard !defaults.bool(forKey: marker) else { return }
+        defaults.set(true, forKey: marker)
+
+        let legacy = UserDefaults.standard
+        let keys = [
+            "deviceIP", "selectedGallery", "selectedGalleries", "randomWeighting",
+            "bleDeviceName", "galleryTabs", "autoRandomEnabled", "autoRandomInterval",
+            "autoRandomDailyMinute", "nasaApiKey", "selectedContentSources",
+            "weatherLocationName", "weatherLatitude", "weatherLongitude",
+            "historyHighlightYear", "randomFolderPath", "favoriteImagePaths",
+            "localFolderLocked", "localFolderPasswordHash"
+        ]
+        for key in keys {
+            guard let value = legacy.object(forKey: key) else { continue }
+            defaults.set(value, forKey: key)
+        }
     }
 }

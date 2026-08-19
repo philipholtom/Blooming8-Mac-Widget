@@ -471,6 +471,28 @@ public final class PhotoController: ObservableObject {
         }
     }
 
+    /// Displays an image that already lives on the frame, by its device path
+    /// (e.g. `/gallerys/Family/IMG_0042.jpg`). The app's gallery browser uses
+    /// this to show a specific picked image rather than a random one.
+    public func showImageAtPath(_ path: String) async {
+        guard !settings.deviceIP.trimmingCharacters(in: .whitespaces).isEmpty else {
+            statusText = "Set the frame's IP address first."
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await withWakeRetry { try await client.show(ip: settings.deviceIP, imagePath: path) }
+            let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
+            previewImage = NSImage(data: data)
+            currentImageData = data
+            currentImagePath = path
+            statusText = "✓ Displayed \((path as NSString).lastPathComponent)"
+        } catch {
+            statusText = "✗ Couldn't display that image: \(error.localizedDescription)"
+        }
+    }
+
     public func showRandomPhoto() async {
         let galleriesToUse = settings.selectedGalleries.intersection(availableGalleryNames)
         guard !galleriesToUse.isEmpty else {
@@ -577,7 +599,6 @@ public final class PhotoController: ObservableObject {
         }
     }
 
-    nonisolated private static let imageFileExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "gif", "bmp", "tiff", "tif", "webp"]
 
     /// The frame's firmware requires uploaded filenames to end with `_P.jpg`
     /// (portrait) or `_L.jpg` (landscape — the device rotates the stored
@@ -609,7 +630,7 @@ public final class PhotoController: ObservableObject {
             return
         }
         let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
-        let allImages = enumerateImageFiles(in: folderURL)
+        let allImages = ImageFolder.enumerateImages(in: folderURL)
         guard allImages.count >= 1 else {
             statusText = "No photos found in '\(folderURL.lastPathComponent)'."
             return
@@ -739,18 +760,5 @@ public final class PhotoController: ObservableObject {
         }
     }
 
-    nonisolated private func enumerateImageFiles(in folder: URL) -> [URL] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: folder,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        var files: [URL] = []
-        for case let url as URL in enumerator where Self.imageFileExtensions.contains(url.pathExtension.lowercased()) {
-            files.append(url)
-        }
-        return files
-    }
 
 }
