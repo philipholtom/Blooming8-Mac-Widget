@@ -79,7 +79,21 @@ struct LibraryGrid: View {
         }
     }
 
+    @ViewBuilder
     private var grid: some View {
+        // Grouped-by-folder only for Local Folder: it's the only source with
+        // real folder structure to show (a device gallery or Favorites is
+        // inherently flat), and it's the source people actually browse
+        // recursively, which is what made "which folder am I looking at"
+        // worth solving.
+        if case .localFolder = library.currentSource {
+            groupedGrid
+        } else {
+            flatGrid
+        }
+    }
+
+    private var flatGrid: some View {
         ScrollView {
             // LazyVGrid only materialises visible cells, and each cell loads
             // its own thumbnail on appear — the combination is what makes a
@@ -89,30 +103,103 @@ struct LibraryGrid: View {
                 spacing: 10
             ) {
                 ForEach(library.filteredItems) { item in
-                    LibraryCell(
-                        item: item,
-                        size: thumbnailSize,
-                        isSelected: library.selectedIDs.contains(item.id),
-                        isCurrentOnFrame: item.devicePath != nil && item.devicePath == controller.currentImagePath,
-                        settings: settings
-                    )
-                    .onTapGesture {
-                        if item.isVideo {
-                            videoForFramePicker = item
-                        } else {
-                            let flags = NSEvent.modifierFlags
-                            library.selectItem(
-                                item,
-                                extendWithCommand: flags.contains(.command),
-                                extendWithShift: flags.contains(.shift)
-                            )
-                        }
-                    }
-                    .contextMenu { contextMenu(for: item) }
+                    cell(for: item)
                 }
             }
             .padding(12)
         }
+    }
+
+    /// One entry per containing folder. Grouped with a dictionary keyed by
+    /// folder path rather than by scanning for contiguous runs — a folder
+    /// with both its own files and a subfolder doesn't stay contiguous
+    /// after sorting by full path (confirmed directly: "Photos/z.jpg" sorts
+    /// *after* "Photos/Sub/b.jpg", since natural sort compares "z" against
+    /// "S" character-by-character with no awareness that one is a deeper
+    /// path), which would otherwise split "Photos" into two separate groups
+    /// with the header repeating. Still a single forward pass plus a sort of
+    /// just the distinct folder paths (far fewer than the item count) — this
+    /// runs once when the item list or filter changes, not per cell or per
+    /// scroll frame, so it isn't part of what makes the grid fast.
+    private struct FolderGroup: Identifiable {
+        let id: String
+        let label: String
+        let items: [LibraryItem]
+    }
+
+    private var folderGroups: [FolderGroup] {
+        let rootPath = settings.randomFolderPath.trimmingCharacters(in: .whitespaces)
+        var itemsByFolder: [String: [LibraryItem]] = [:]
+        for item in library.filteredItems {
+            let folderPath = item.url?.deletingLastPathComponent().path ?? ""
+            itemsByFolder[folderPath, default: []].append(item)
+        }
+        return itemsByFolder.keys
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            .map { folderPath in
+                FolderGroup(id: folderPath, label: folderLabel(for: folderPath, root: rootPath), items: itemsByFolder[folderPath] ?? [])
+            }
+    }
+
+    private func folderLabel(for folderPath: String, root: String) -> String {
+        guard folderPath.hasPrefix(root) else { return (folderPath as NSString).lastPathComponent }
+        let relative = folderPath.dropFirst(root.count).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if relative.isEmpty {
+            return (root as NSString).lastPathComponent
+        }
+        return relative
+    }
+
+    private var groupedGrid: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18, pinnedViews: [.sectionHeaders]) {
+                ForEach(folderGroups) { group in
+                    Section {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: thumbnailSize), spacing: 10)],
+                            spacing: 10
+                        ) {
+                            ForEach(group.items) { item in
+                                cell(for: item)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                    } header: {
+                        Text(group.label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.bar)
+                    }
+                }
+            }
+            .padding(.vertical, 12)
+        }
+    }
+
+    private func cell(for item: LibraryItem) -> some View {
+        LibraryCell(
+            item: item,
+            size: thumbnailSize,
+            isSelected: library.selectedIDs.contains(item.id),
+            isCurrentOnFrame: item.devicePath != nil && item.devicePath == controller.currentImagePath,
+            settings: settings
+        )
+        .onTapGesture {
+            if item.isVideo {
+                videoForFramePicker = item
+            } else {
+                let flags = NSEvent.modifierFlags
+                library.selectItem(
+                    item,
+                    extendWithCommand: flags.contains(.command),
+                    extendWithShift: flags.contains(.shift)
+                )
+            }
+        }
+        .contextMenu { contextMenu(for: item) }
     }
 
     @ViewBuilder
