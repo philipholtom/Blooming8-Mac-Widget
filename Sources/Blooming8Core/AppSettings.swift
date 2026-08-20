@@ -102,6 +102,14 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(randomFolderPath, forKey: "randomFolderPath") }
     }
 
+    /// When true, a landscape source photo is cropped and centered to fill
+    /// the frame's portrait canvas instead of being letterboxed. Portrait and
+    /// square sources are unaffected either way — they don't have the "tiny
+    /// photo between two black bars" problem this exists to fix.
+    @Published public var cropLandscapePhotos: Bool {
+        didSet { defaults.set(cropLandscapePhotos, forKey: "cropLandscapePhotos") }
+    }
+
     /// List of favorite image file paths marked by the user.
     @Published public var favoriteImagePaths: [String] {
         didSet { defaults.set(favoriteImagePaths, forKey: "favoriteImagePaths") }
@@ -178,6 +186,7 @@ public final class AppSettings: ObservableObject {
         historyHighlightYear = defaults.object(forKey: "historyHighlightYear") != nil
             ? defaults.integer(forKey: "historyHighlightYear") : 1979
         randomFolderPath = defaults.string(forKey: "randomFolderPath") ?? ""
+        cropLandscapePhotos = defaults.bool(forKey: "cropLandscapePhotos")
         favoriteImagePaths = defaults.stringArray(forKey: "favoriteImagePaths") ?? []
         localFolderLocked = defaults.bool(forKey: "localFolderLocked")
         localFolderPasswordHash = defaults.string(forKey: "localFolderPasswordHash")

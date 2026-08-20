@@ -196,7 +196,7 @@ public final class PhotoController: ObservableObject {
             for (index, url) in urls.enumerated() {
                 statusText = "Uploading \(url.lastPathComponent) (\(index + 1)/\(urls.count))..."
                 guard let cgImage = loadUprightCGImage(at: url),
-                      let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+                      let framed = renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: settings.cropLandscapePhotos),
                       let jpeg = ImageCanvas.jpegData(framed)
                 else {
                     failed += 1
@@ -610,6 +610,27 @@ public final class PhotoController: ObservableObject {
         "\(base)_P.jpg"
     }
 
+    /// Fits `cgImage` onto a `width`x`height` portrait canvas, choosing
+    /// aspect-fill (crop and center, no bars) over aspect-fit (whole photo
+    /// visible, letterboxed) only when both `cropLandscapePhotos` is true and
+    /// the source is actually landscape. A portrait or square source already
+    /// roughly matches the frame's aspect ratio and doesn't have the "tiny
+    /// photo between two black bars" problem the setting exists to fix, so
+    /// it's always fit rather than cropped regardless of the flag.
+    ///
+    /// `nonisolated` and takes the flag as a plain parameter rather than
+    /// reading `settings.cropLandscapePhotos` itself: one call site runs
+    /// inside `Task.detached` off the main actor, so this can't be
+    /// `@MainActor`-isolated the way an ordinary instance method would be by
+    /// default.
+    nonisolated private func renderForFrame(cgImage: CGImage, width: Int, height: Int, cropLandscapePhotos: Bool) -> NSImage? {
+        let isLandscape = cgImage.width > cgImage.height
+        if cropLandscapePhotos, isLandscape {
+            return renderFilled(cgImage: cgImage, width: width, height: height)
+        }
+        return renderLetterboxed(cgImage: cgImage, width: width, height: height, background: .black)
+    }
+
 
     public struct LocalFolderCandidate {
         public let fileURL: URL
@@ -635,6 +656,7 @@ public final class PhotoController: ObservableObject {
             statusText = "No photos found in '\(folderURL.lastPathComponent)'."
             return
         }
+        let cropLandscapePhotos = settings.cropLandscapePhotos
 
         Task.detached(priority: .userInitiated) { [weak self] in
             var candidates: [LocalFolderCandidate] = []
@@ -642,7 +664,7 @@ public final class PhotoController: ObservableObject {
 
             for chosen in chosenURLs {
                 guard let cgImage = loadUprightCGImage(at: chosen),
-                      let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+                      let framed = self?.renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: cropLandscapePhotos),
                       let jpeg = ImageCanvas.jpegData(framed)
                 else {
                     continue
@@ -670,7 +692,7 @@ public final class PhotoController: ObservableObject {
     /// Loads and prepares a specific image from a file path for display/upload.
     public func prepareBrowsedImage(url: URL) {
         guard let cgImage = loadUprightCGImage(at: url),
-              let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+              let framed = renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: settings.cropLandscapePhotos),
               let jpeg = ImageCanvas.jpegData(framed)
         else {
             statusText = "Couldn't read '\(url.lastPathComponent)'."

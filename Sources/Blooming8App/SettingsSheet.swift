@@ -28,6 +28,13 @@ struct SettingsSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Photos") {
+                    Toggle("Crop landscape photos to fill the frame", isOn: $settings.cropLandscapePhotos)
+                    Text("Off: a landscape photo shows in full, with black bars above and below. On: it's cropped and centered to fill the whole screen instead. Portrait photos aren't affected.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Local Folder") {
                     HStack {
                         Text(settings.randomFolderPath.isEmpty ? "No folder chosen" : settings.randomFolderPath)

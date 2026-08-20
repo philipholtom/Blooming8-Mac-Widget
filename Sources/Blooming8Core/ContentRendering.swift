@@ -204,6 +204,39 @@ public func renderLetterboxed(cgImage: CGImage, width: Int, height: Int, backgro
     }
 }
 
+/// Fits `cgImage` into a `width`x`height` canvas by scaling to *cover* the
+/// canvas and cropping the overflow, centered — the opposite tradeoff to
+/// `renderLetterboxed`: no padding bars, but part of the photo is cut off.
+/// Meant for a landscape photo on a portrait frame, where fitting the whole
+/// image renders it small in the middle of two large background bars.
+public func renderFilled(cgImage: CGImage, width: Int, height: Int) -> NSImage? {
+    ImageCanvas.render(width: width, height: height) {
+        let imageAspect = CGFloat(cgImage.width) / CGFloat(cgImage.height)
+        let canvasAspect = CGFloat(width) / CGFloat(height)
+        let fitWidth: CGFloat
+        let fitHeight: CGFloat
+        if imageAspect > canvasAspect {
+            // Wider than the canvas: match height, overflow left/right.
+            fitHeight = CGFloat(height)
+            fitWidth = fitHeight * imageAspect
+        } else {
+            // Taller than the canvas: match width, overflow top/bottom.
+            fitWidth = CGFloat(width)
+            fitHeight = fitWidth / imageAspect
+        }
+        let rect = NSRect(
+            x: (CGFloat(width) - fitWidth) / 2,
+            y: (CGFloat(height) - fitHeight) / 2,
+            width: fitWidth,
+            height: fitHeight
+        )
+        // CGContext clips drawing to its own bounds automatically, so the
+        // overflow left/right or top/bottom is simply cut off here — no
+        // explicit clip path needed.
+        drawImage(NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height)), in: rect)
+    }
+}
+
 public func fittingFontSize(
     for text: String,
     fontName: String,
