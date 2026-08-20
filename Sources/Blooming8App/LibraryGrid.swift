@@ -193,14 +193,20 @@ private struct LibraryCell: View {
         }
         .help(item.url?.path ?? item.devicePath ?? item.name)
         .task(id: item.id) {
-            guard image == nil, let url = item.url else {
-                // Device-hosted images aren't fetched as thumbnails: pulling
-                // thousands of full JPEGs over the frame's HTTP server would
-                // hammer it. The inspector fetches the selected one instead.
-                didAttemptLoad = true
-                return
+            guard image == nil else { return }
+            if let url = item.url {
+                image = await ThumbnailStore.shared.thumbnail(for: url, maxPixelSize: 400)
+            } else if let devicePath = item.devicePath {
+                // The frame has no thumbnail endpoint, so this is a real
+                // full-size fetch — DeviceThumbnailStore caps how many run
+                // at once so a big gallery doesn't hammer the frame's HTTP
+                // server while the grid scrolls past dozens of cells.
+                image = await DeviceThumbnailStore.shared.thumbnail(
+                    ip: settings.deviceIP,
+                    path: devicePath,
+                    maxPixelSize: 400
+                )
             }
-            image = await ThumbnailStore.shared.thumbnail(for: url, maxPixelSize: 400)
             didAttemptLoad = true
         }
     }

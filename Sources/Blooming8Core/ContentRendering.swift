@@ -155,6 +155,17 @@ public func wrapTextToWidth(_ text: String, font: NSFont, maxWidth: CGFloat) -> 
 /// upright regardless of source format.
 public func loadUprightCGImage(at url: URL, maxPixelSize: Int = 2400) -> CGImage? {
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    return uprightThumbnail(from: source, maxPixelSize: maxPixelSize)
+}
+
+/// Same as `loadUprightCGImage(at:maxPixelSize:)` but for image bytes already
+/// in memory (e.g. fetched over HTTP) rather than a file on disk.
+public func loadUprightCGImage(data: Data, maxPixelSize: Int = 2400) -> CGImage? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+    return uprightThumbnail(from: source, maxPixelSize: maxPixelSize)
+}
+
+private func uprightThumbnail(from source: CGImageSource, maxPixelSize: Int) -> CGImage? {
     let options: [CFString: Any] = [
         kCGImageSourceCreateThumbnailWithTransform: true,
         kCGImageSourceCreateThumbnailFromImageAlways: true,
