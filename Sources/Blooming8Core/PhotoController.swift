@@ -702,6 +702,21 @@ public final class PhotoController: ObservableObject {
         statusText = ""
     }
 
+    /// Same as `prepareBrowsedImage`, but for a frame already extracted from
+    /// a local video (`VideoFrameExtractor`) rather than a still image on
+    /// disk — `sourceURL` is kept only for display/reveal-in-Finder, the
+    /// frame itself comes from `cgImage`, not from re-reading that file.
+    public func prepareVideoFrame(cgImage: CGImage, sourceURL: URL) {
+        guard let framed = renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: settings.cropLandscapePhotos),
+              let jpeg = ImageCanvas.jpegData(framed)
+        else {
+            statusText = "Couldn't process that frame."
+            return
+        }
+        localFolderCandidates = [LocalFolderCandidate(fileURL: sourceURL, image: framed, jpegData: jpeg)]
+        statusText = ""
+    }
+
     /// Uploads the approved candidate to the frame's "Random" gallery and
     /// displays it immediately. That gallery is meant to hold exactly one
     /// photo at a time, so whatever's already in it is deleted first rather

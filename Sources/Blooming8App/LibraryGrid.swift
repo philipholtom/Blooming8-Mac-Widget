@@ -8,6 +8,11 @@ struct LibraryGrid: View {
     @ObservedObject var controller: PhotoController
     let thumbnailSize: Double
 
+    /// A video the user tapped, awaiting the frame-picker sheet. Videos
+    /// aren't sent directly — there's no single "the" frame to upload — so a
+    /// tap here bypasses `library.selection`/Send entirely.
+    @State private var videoForFramePicker: LibraryItem?
+
     var body: some View {
         Group {
             if library.isLoading {
@@ -23,6 +28,11 @@ struct LibraryGrid: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .searchable(text: $library.searchText, placement: .toolbar, prompt: "Filter by filename")
         .safeAreaInset(edge: .bottom) { countBar }
+        .sheet(item: $videoForFramePicker) { item in
+            if let url = item.url {
+                VideoFramePickerSheet(videoURL: url, controller: controller)
+            }
+        }
     }
 
     private var grid: some View {
@@ -41,7 +51,13 @@ struct LibraryGrid: View {
                         isSelected: library.selection == item.id,
                         settings: settings
                     )
-                    .onTapGesture { library.selection = item.id }
+                    .onTapGesture {
+                        if item.isVideo {
+                            videoForFramePicker = item
+                        } else {
+                            library.selection = item.id
+                        }
+                    }
                     .contextMenu { contextMenu(for: item) }
                 }
             }
@@ -51,7 +67,11 @@ struct LibraryGrid: View {
 
     @ViewBuilder
     private func contextMenu(for item: LibraryItem) -> some View {
-        Button("Send to Frame") { send(item) }
+        if item.isVideo {
+            Button("Pick a Frame to Send…") { videoForFramePicker = item }
+        } else {
+            Button("Send to Frame") { send(item) }
+        }
 
         if let url = item.url {
             Divider()
@@ -62,14 +82,16 @@ struct LibraryGrid: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url.path, forType: .string)
             }
-            Divider()
-            if settings.favoriteImagePaths.contains(url.path) {
-                Button("Remove from Favorites", role: .destructive) {
-                    settings.favoriteImagePaths.removeAll { $0 == url.path }
-                }
-            } else {
-                Button("Add to Favorites") {
-                    settings.favoriteImagePaths.append(url.path)
+            if !item.isVideo {
+                Divider()
+                if settings.favoriteImagePaths.contains(url.path) {
+                    Button("Remove from Favorites", role: .destructive) {
+                        settings.favoriteImagePaths.removeAll { $0 == url.path }
+                    }
+                } else {
+                    Button("Add to Favorites") {
+                        settings.favoriteImagePaths.append(url.path)
+                    }
                 }
             }
         }
@@ -133,10 +155,13 @@ struct LibraryGrid: View {
     private var countLabel: String {
         let shown = library.filteredItems.count
         let total = library.items.count
+        let videoCount = library.items.filter(\.isVideo).count
+        let imageCount = total - videoCount
+        let videoSuffix = videoCount > 0 ? ", \(videoCount) video\(videoCount == 1 ? "" : "s")" : ""
         if shown == total {
-            return total == 1 ? "1 image" : "\(total) images"
+            return "\(imageCount) image\(imageCount == 1 ? "" : "s")\(videoSuffix)"
         }
-        return "\(shown) of \(total) images"
+        return "\(shown) of \(total) shown\(videoSuffix)"
     }
 }
 
@@ -163,7 +188,7 @@ private struct LibraryCell: View {
                         .aspectRatio(contentMode: .fill)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 } else if didAttemptLoad {
-                    Image(systemName: item.isLocal ? "questionmark.square.dashed" : "photo")
+                    Image(systemName: item.isVideo ? "film" : (item.isLocal ? "questionmark.square.dashed" : "photo"))
                         .font(.system(size: 20))
                         .foregroundStyle(.tertiary)
                 } else {
@@ -176,6 +201,12 @@ private struct LibraryCell: View {
                         .foregroundStyle(.yellow)
                         .padding(4)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
+
+                if item.isVideo {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.white, .black.opacity(0.4))
                 }
             }
             .frame(height: size)
@@ -194,7 +225,9 @@ private struct LibraryCell: View {
         .help(item.url?.path ?? item.devicePath ?? item.name)
         .task(id: item.id) {
             guard image == nil else { return }
-            if let url = item.url {
+            if item.isVideo, let url = item.url {
+                image = await VideoFrameExtractor.previewFrame(from: url, maxPixelSize: 400)
+            } else if let url = item.url {
                 image = await ThumbnailStore.shared.thumbnail(for: url, maxPixelSize: 400)
             } else if let devicePath = item.devicePath {
                 // The frame has no thumbnail endpoint, so this is a real
