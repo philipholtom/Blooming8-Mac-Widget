@@ -102,18 +102,26 @@ struct VideoFramePickerSheet: View {
 
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 10)], spacing: 10) {
-                    ForEach(Array(frames.enumerated()), id: \.offset) { _, frame in
-                        Button {
-                            selectFrame(frame)
-                        } label: {
-                            Image(nsImage: frame)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(height: 110)
-                                .clipped()
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
+                    ForEach(Array(frames.enumerated()), id: \.offset) { index, frame in
+                        // Plain .onTapGesture, not Button: diagnostic logging
+                        // showed the *same* click coordinates, in the *same*
+                        // cell, sometimes fired the Button's action and
+                        // sometimes didn't — genuinely intermittent, not a
+                        // geometry mismatch, meaning Button's own gesture
+                        // recognition is what's unreliable here (inside a
+                        // LazyVGrid, on this OS). Same fix as the sidebar
+                        // bug earlier: the simpler, more direct gesture
+                        // works where the higher-level control didn't.
+                        Image(nsImage: frame)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(height: 110)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectFrame(frame)
+                            }
                     }
                 }
             }

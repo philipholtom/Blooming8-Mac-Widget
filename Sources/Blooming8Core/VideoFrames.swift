@@ -35,9 +35,41 @@ public enum VideoFrameExtractor {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: maxPixelSize, height: maxPixelSize)
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
+        // Zero tolerance forces AVFoundation to decode the *exact* requested
+        // frame, which is fragile — on some videos (sparse keyframes, an
+        // unusual structure near the start) it fails outright for certain
+        // timestamps rather than just being slow. Observed directly: the
+        // frame picker's grid would end up with only some slots populated,
+        // and it was disproportionately the earlier ones that failed. A
+        // half-second tolerance lets the generator snap to whatever nearby
+        // frame it can decode reliably — plenty precise for "pick roughly
+        // this moment," which is all this picker ever needed.
+        let tolerance = CMTime(seconds: 0.5, preferredTimescale: 600)
+        generator.requestedTimeToleranceBefore = tolerance
+        generator.requestedTimeToleranceAfter = tolerance
         return generator
+    }
+
+    /// Attempts a single frame at `time`, retrying at a couple of small
+    /// offsets if the exact point fails — a slot's chosen instant can land
+    /// on something the decoder can't produce, and giving up on the whole
+    /// slot after one failure was exactly what caused a video to sometimes
+    /// hand back fewer than `count` frames, silently, with rows in the
+    /// picker grid that were never actually there rather than just
+    /// unclickable.
+    private static func extractOneFrame(
+        generator: AVAssetImageGenerator,
+        around time: CMTime,
+        slotBounds: ClosedRange<Double>
+    ) -> NSImage? {
+        let attempts = [time.seconds, slotBounds.lowerBound, slotBounds.upperBound]
+        for seconds in attempts {
+            let attemptTime = CMTime(seconds: max(seconds, 0), preferredTimescale: 600)
+            if let cgImage = try? generator.copyCGImage(at: attemptTime, actualTime: nil) {
+                return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+            }
+        }
+        return nil
     }
 
     /// `count` frames spread across the video, skipping a small margin at
@@ -57,12 +89,14 @@ public enum VideoFrameExtractor {
         let margin = totalSeconds * 0.05
         let usableRange = max(totalSeconds - margin * 2, 0.1)
         let slotWidth = usableRange / Double(count)
-        let times: [CMTime] = (0..<count).map { i in
+        let slots: [(target: CMTime, bounds: ClosedRange<Double>)] = (0..<count).map { i in
             let slotStart = margin + Double(i) * slotWidth
+            let slotEnd = slotStart + slotWidth
             // Stays off both edges of its slot so consecutive frames can't
             // land right next to each other by chance.
             let offset = Double.random(in: 0.15...0.85) * slotWidth
-            return CMTime(seconds: slotStart + offset, preferredTimescale: 600)
+            let target = CMTime(seconds: slotStart + offset, preferredTimescale: 600)
+            return (target, slotStart...slotEnd)
         }
 
         // AVAssetImageGenerator's per-frame call is synchronous and blocking
@@ -70,12 +104,9 @@ public enum VideoFrameExtractor {
         // actor so pulling several frames doesn't freeze the window.
         return await Task.detached(priority: .userInitiated) {
             let generator = makeGenerator(for: url, maxPixelSize: maxPixelSize)
-            var images: [NSImage] = []
-            for time in times {
-                guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else { continue }
-                images.append(NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height)))
+            return slots.compactMap { slot in
+                extractOneFrame(generator: generator, around: slot.target, slotBounds: slot.bounds)
             }
-            return images
         }.value
     }
 
@@ -85,12 +116,12 @@ public enum VideoFrameExtractor {
         guard let duration = try? await AVURLAsset(url: url).load(.duration),
               duration.isValid, duration.seconds > 0
         else { return nil }
-        let time = CMTime(seconds: min(duration.seconds * 0.1, 3), preferredTimescale: 600)
+        let seconds = min(duration.seconds * 0.1, 3)
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
 
         return await Task.detached(priority: .utility) {
             let generator = makeGenerator(for: url, maxPixelSize: maxPixelSize)
-            guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else { return nil }
-            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+            return extractOneFrame(generator: generator, around: time, slotBounds: 0...max(seconds, 0.1))
         }.value
     }
 }
