@@ -24,6 +24,7 @@ struct SettingsSheet: View {
     @State private var newTabName = ""
     @State private var passwordDrafts: [UUID: String] = [:]
     @State private var newLocalFolderPassword = ""
+    @State private var showConnectCanvas = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -36,7 +37,10 @@ struct SettingsSheet: View {
             Form {
                 Section("Frame") {
                     TextField("IP address", text: $ipDraft, prompt: Text("192.168.1.42"))
-                    TextField("Bluetooth name", text: $bleNameDraft, prompt: Text("Office"))
+                    HStack {
+                        TextField("Bluetooth name", text: $bleNameDraft, prompt: Text("Office"))
+                        Button("Scan\u{2026}") { showConnectCanvas = true }
+                    }
                     Text("The Bluetooth name is used to wake the frame when it's asleep and stops answering over Wi-Fi.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -113,6 +117,14 @@ struct SettingsSheet: View {
             .padding(16)
         }
         .frame(minWidth: 520, idealWidth: 560, minHeight: 470, idealHeight: 640, maxHeight: 800)
+        .sheet(isPresented: $showConnectCanvas) {
+            ConnectCanvasView { name, ip in
+                bleNameDraft = name
+                if let ip {
+                    ipDraft = ip
+                }
+            }
+        }
         .onAppear {
             ipDraft = settings.deviceIP
             bleNameDraft = settings.bleDeviceName
