@@ -1,33 +1,44 @@
 import Blooming8Core
 import SwiftUI
+import os
 
 struct Sidebar: View {
+    private static let log = Logger(subsystem: "com.pholtom.blooming8app", category: "ui")
+
     @ObservedObject var settings: AppSettings
     @ObservedObject var controller: PhotoController
-    @Binding var source: LibrarySource
+    @Binding var source: LibrarySource?
 
     var body: some View {
-        List(selection: $source) {
-            Section("Frame") {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                sectionHeader("Frame")
                 row(.currentPhoto)
-            }
 
-            Section("Library") {
+                sectionHeader("Library")
                 row(.localFolder)
                 row(.favorites, badge: settings.favoriteImagePaths.count)
                 row(.generated)
-            }
 
-            if !visibleGalleries.isEmpty {
-                Section("Galleries") {
+                if !visibleGalleries.isEmpty {
+                    sectionHeader("Galleries")
                     ForEach(visibleGalleries, id: \.self) { name in
                         row(.gallery(name))
                     }
                 }
             }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
         }
-        .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) { statusFooter }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 8)
+            .padding(.top, 4)
     }
 
     /// Galleries assigned to a locked tab stay hidden until that tab is
@@ -41,11 +52,41 @@ struct Sidebar: View {
         return controller.galleries.filter { !hidden.contains($0) }
     }
 
-    @ViewBuilder
+    /// A plain tappable row rather than `List(selection:)`. That binding
+    /// never fired here — clicking a row produced no selection change and no
+    /// log line, on a window confirmed to be real, on-screen, and receiving
+    /// other input (it could be resized). Rather than keep chasing whichever
+    /// SwiftUI/AppKit interaction is swallowing the selection, this sets
+    /// `source` directly from a button's own action closure, which only
+    /// depends on ordinary tap-gesture delivery.
     private func row(_ item: LibrarySource, badge: Int? = nil) -> some View {
-        Label(item.title, systemImage: item.symbol)
-            .tag(item)
-            .badge(badge ?? 0)
+        let isSelected = source == item
+        return Button {
+            Self.log.notice("row tapped: \(item.title, privacy: .public)")
+            source = item
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: item.symbol)
+                    .frame(width: 18)
+                Text(item.title)
+                Spacer()
+                if let badge, badge > 0 {
+                    Text("\(badge)")
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.2))
+                        .clipShape(Capsule())
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+            .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var statusFooter: some View {

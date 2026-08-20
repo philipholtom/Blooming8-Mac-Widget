@@ -1,13 +1,16 @@
 import Blooming8Core
 import AppKit
 import SwiftUI
+import os
 
 struct RootView: View {
+    fileprivate static let log = Logger(subsystem: "com.pholtom.blooming8app", category: "ui")
+
     @ObservedObject var settings: AppSettings
     @ObservedObject var controller: PhotoController
     @StateObject private var library: LibraryModel
 
-    @State private var source: LibrarySource = .currentPhoto
+    @State private var source: LibrarySource? = .currentPhoto
     @State private var showSettings = false
     @State private var thumbnailSize: Double = 150
 
@@ -25,7 +28,7 @@ struct RootView: View {
             detail
                 .toolbar { toolbarContent }
         }
-        .navigationTitle(source.title)
+        .navigationTitle(activeSource.title)
         .task {
             guard !settings.deviceIP.isEmpty else {
                 showSettings = true
@@ -35,10 +38,12 @@ struct RootView: View {
             await controller.loadGalleries()
         }
         .onChange(of: source) { newValue in
-            library.load(newValue)
+            let resolved = newValue ?? .currentPhoto
+            Self.log.notice("sidebar: selected \(resolved.title, privacy: .public)")
+            library.load(resolved)
         }
         .onChange(of: settings.favoriteImagePaths) { _ in
-            if case .favorites = source { library.load(source) }
+            if activeSource == .favorites { library.load(.favorites) }
         }
         .sheet(isPresented: $showSettings) {
             SettingsSheet(settings: settings, controller: controller)
@@ -47,7 +52,7 @@ struct RootView: View {
 
     @ViewBuilder
     private var detail: some View {
-        switch source {
+        switch activeSource {
         case .currentPhoto:
             CurrentPhotoPane(controller: controller, settings: settings)
         case .generated:
@@ -107,8 +112,10 @@ struct RootView: View {
         }
     }
 
+    private var activeSource: LibrarySource { source ?? .currentPhoto }
+
     private var isGridSource: Bool {
-        switch source {
+        switch activeSource {
         case .currentPhoto, .generated: return false
         default: return true
         }

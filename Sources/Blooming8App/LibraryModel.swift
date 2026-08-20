@@ -2,6 +2,7 @@ import Blooming8Core
 import AppKit
 import Combine
 import SwiftUI
+import os
 
 /// What the sidebar can select, and the detail pane can show.
 enum LibrarySource: Hashable {
@@ -62,6 +63,8 @@ struct LibraryItem: Identifiable, Hashable {
 /// thread — a 10k-file folder walk on the main actor freezes the window.
 @MainActor
 final class LibraryModel: ObservableObject {
+    private static let log = Logger(subsystem: "com.pholtom.blooming8app", category: "library")
+
     @Published var items: [LibraryItem] = []
     @Published var isLoading = false
     @Published var loadError: String?
@@ -89,6 +92,7 @@ final class LibraryModel: ObservableObject {
     }
 
     func load(_ source: LibrarySource) {
+        Self.log.notice("load: \(source.title, privacy: .public)")
         loadTask?.cancel()
         selection = nil
         loadError = nil
@@ -128,6 +132,7 @@ final class LibraryModel: ObservableObject {
             }.value
             guard !Task.isCancelled else { return }
             items = urls.map(LibraryItem.init(localURL:))
+            Self.log.notice("load: local folder produced \(urls.count) images")
             isLoading = false
             if items.isEmpty { loadError = "No images found under \(folder.path)." }
         }
