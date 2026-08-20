@@ -44,6 +44,33 @@ struct CurrentPhotoPane: View {
                         .truncationMode(.middle)
                 }
 
+                GroupBox("Galleries for Random Photo") {
+                    let names = controller.availableGalleryNames.sorted()
+                    if names.isEmpty {
+                        Text(controller.galleries.isEmpty ? "No galleries loaded yet." : "No unlocked galleries available.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(6)
+                    } else {
+                        // This is the same settings.selectedGalleries the
+                        // widget's own checkboxes read and write — shared
+                        // settings, so checking a gallery here also checks it
+                        // there. Random Photo had no way to see or change
+                        // this from the app at all before; it silently used
+                        // whatever the widget last had checked.
+                        VStack(alignment: .leading, spacing: 3) {
+                            ForEach(names, id: \.self) { name in
+                                Toggle(name, isOn: gallerySelectionBinding(for: name))
+                                    .toggleStyle(.checkbox)
+                                    .font(.caption)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(6)
+                    }
+                }
+                .frame(maxWidth: 720)
+
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Randomize by")
                         .font(.caption)
@@ -113,6 +140,19 @@ struct CurrentPhotoPane: View {
         .onChange(of: controller.galleries) { names in
             if slideshowGallery.isEmpty { slideshowGallery = names.first ?? "" }
         }
+    }
+
+    private func gallerySelectionBinding(for gallery: String) -> Binding<Bool> {
+        Binding(
+            get: { settings.selectedGalleries.contains(gallery) },
+            set: { isOn in
+                if isOn {
+                    settings.selectedGalleries.insert(gallery)
+                } else {
+                    settings.selectedGalleries.remove(gallery)
+                }
+            }
+        )
     }
 
     private func savePhoto() {
