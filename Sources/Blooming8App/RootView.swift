@@ -21,13 +21,23 @@ struct RootView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        // HSplitView, not NavigationSplitView: the sidebar's clicks
+        // resolved to the wrong row, consistently and reproducibly, no
+        // matter what changed in Sidebar's own view code. Diagnostic
+        // logging confirmed clicks at genuinely different screen positions
+        // were all being reported at nearly the same coordinate — the input
+        // wasn't reaching this code with the right position in the first
+        // place. Replacing NavigationSplitView's sidebar column (newer and
+        // more complex than the long-stable HSplitView already used for the
+        // grid/inspector split below) with HSplitView here resolved it.
+        HSplitView {
             Sidebar(settings: settings, controller: controller, source: $source)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
-        } detail: {
+                .frame(minWidth: 200, idealWidth: 230, maxWidth: 320)
+
             detail
-                .toolbar { toolbarContent }
+                .frame(minWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
         }
+        .toolbar { toolbarContent }
         .navigationTitle(activeSource.title)
         .task {
             guard !settings.deviceIP.isEmpty else {

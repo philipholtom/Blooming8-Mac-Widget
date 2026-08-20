@@ -10,27 +10,42 @@ struct Sidebar: View {
     @Binding var source: LibrarySource?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                sectionHeader("Frame")
-                row(.currentPhoto)
+        // The footer is a plain sibling below the ScrollView, not a
+        // `.safeAreaInset` on top of it. `statusFooter` shows
+        // `controller.statusText`, which changes continuously (and changes
+        // line count) while a wake/refresh/load is in flight. As an inset
+        // over the same scroll view as the clickable rows, any resize of the
+        // footer reflows every row above it — so a status update landing
+        // between the moment you see a row and the moment your click
+        // registers can shift that row out from under the cursor and hand
+        // the tap to whatever row moved into its place. Isolating the footer
+        // to a fixed-height sibling makes it structurally unable to move the
+        // rows, however often its content changes.
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    sectionHeader("Frame")
+                    row(.currentPhoto)
 
-                sectionHeader("Library")
-                row(.localFolder)
-                row(.favorites, badge: settings.favoriteImagePaths.count)
-                row(.generated)
+                    sectionHeader("Library")
+                    row(.localFolder)
+                    row(.favorites, badge: settings.favoriteImagePaths.count)
+                    row(.generated)
 
-                if !visibleGalleries.isEmpty {
-                    sectionHeader("Galleries")
-                    ForEach(visibleGalleries, id: \.self) { name in
-                        row(.gallery(name))
+                    if !visibleGalleries.isEmpty {
+                        sectionHeader("Galleries")
+                        ForEach(visibleGalleries, id: \.self) { name in
+                            row(.gallery(name))
+                        }
                     }
                 }
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
             }
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
+            .frame(maxHeight: .infinity)
+
+            statusFooter
         }
-        .safeAreaInset(edge: .bottom) { statusFooter }
     }
 
     private func sectionHeader(_ title: String) -> some View {
@@ -53,13 +68,25 @@ struct Sidebar: View {
     }
 
     /// A plain tappable row rather than `List(selection:)`. That binding
-    /// never fired here — clicking a row produced no selection change and no
-    /// log line, on a window confirmed to be real, on-screen, and receiving
-    /// other input (it could be resized). Rather than keep chasing whichever
-    /// SwiftUI/AppKit interaction is swallowing the selection, this sets
-    /// `source` directly from a button's own action closure, which only
-    /// depends on ordinary tap-gesture delivery.
+    /// never fired inside `NavigationSplitView`'s sidebar column — clicking a
+    /// row produced no selection change at all, on a window confirmed to be
+    /// real, on-screen, and receiving other input. The actual root cause
+    /// turned out to be `NavigationSplitView` itself misdelivering clicks in
+    /// its sidebar column on this OS version (fixed by using `HSplitView`
+    /// instead, in `RootView`); this plain-Button structure predates that
+    /// fix and is kept because it's simpler than `List(selection:)` for a
+    /// fixed set of rows regardless.
+    @ViewBuilder
     private func row(_ item: LibrarySource, badge: Int? = nil) -> some View {
+        if #available(macOS 14.0, *) {
+            rowButton(item, badge: badge)
+                .focusEffectDisabled()
+        } else {
+            rowButton(item, badge: badge)
+        }
+    }
+
+    private func rowButton(_ item: LibrarySource, badge: Int?) -> some View {
         let isSelected = source == item
         return Button {
             Self.log.notice("row tapped: \(item.title, privacy: .public)")
@@ -89,6 +116,9 @@ struct Sidebar: View {
         .buttonStyle(.plain)
     }
 
+    /// Fixed height regardless of content: `controller.statusText` varies in
+    /// length and appears/disappears as operations run, and this view must
+    /// never resize in response — see the comment in `body` for why.
     private var statusFooter: some View {
         VStack(alignment: .leading, spacing: 4) {
             Divider()
@@ -113,16 +143,17 @@ struct Sidebar: View {
                     .lineLimit(1)
             }
 
-            if !controller.statusText.isEmpty {
-                Text(controller.statusText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(controller.statusText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .opacity(controller.statusText.isEmpty ? 0 : 1)
         }
         .padding(.horizontal, 12)
+        .padding(.top, 6)
         .padding(.bottom, 10)
+        .frame(height: 78, alignment: .top)
+        .clipped()
     }
 
     private var awakeColor: Color {
