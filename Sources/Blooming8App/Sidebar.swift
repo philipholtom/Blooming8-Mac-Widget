@@ -9,6 +9,9 @@ struct Sidebar: View {
     @ObservedObject var controller: PhotoController
     @Binding var source: LibrarySource?
 
+    @State private var showNewGallerySheet = false
+    @State private var newGalleryName = ""
+
     var body: some View {
         // The footer is a plain sibling below the ScrollView, not a
         // `.safeAreaInset` on top of it. `statusFooter` shows
@@ -32,11 +35,9 @@ struct Sidebar: View {
                     row(.favorites, badge: settings.favoriteImagePaths.count)
                     row(.generated)
 
-                    if !visibleGalleries.isEmpty {
-                        sectionHeader("Galleries")
-                        ForEach(visibleGalleries, id: \.self) { name in
-                            row(.gallery(name), isLocked: lockedTab(for: name) != nil)
-                        }
+                    galleriesHeader
+                    ForEach(visibleGalleries, id: \.self) { name in
+                        row(.gallery(name), isLocked: lockedTab(for: name) != nil)
                     }
                 }
                 .padding(.horizontal, 10)
@@ -57,6 +58,55 @@ struct Sidebar: View {
                 .opacity(0)
                 .accessibilityHidden(true)
         )
+    }
+
+    /// Unlike the other sections, shown even with zero galleries — the "+"
+    /// button is the only way to create one, so it needs to always be there.
+    private var galleriesHeader: some View {
+        HStack {
+            sectionHeader("Galleries")
+            Spacer()
+            Button {
+                newGalleryName = ""
+                showNewGallerySheet = true
+            } label: {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tertiary)
+            .padding(.trailing, 8)
+            .help("New Gallery")
+            .popover(isPresented: $showNewGallerySheet) {
+                newGalleryPopover
+            }
+        }
+    }
+
+    private var newGalleryPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("New Gallery")
+                .font(.headline)
+            TextField("Gallery name", text: $newGalleryName)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 220)
+                .onSubmit { createGallery() }
+            HStack {
+                Spacer()
+                Button("Cancel") { showNewGallerySheet = false }
+                Button("Create") { createGallery() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(newGalleryName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(16)
+    }
+
+    private func createGallery() {
+        let name = newGalleryName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        showNewGallerySheet = false
+        Task { await controller.createGallery(name: name) }
     }
 
     private func sectionHeader(_ title: String) -> some View {

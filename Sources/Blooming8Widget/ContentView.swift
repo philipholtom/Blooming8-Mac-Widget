@@ -30,6 +30,7 @@ struct ContentView: View {
 
     @State private var manageGallery: String = ""
     @State private var newGalleryNameForUpload: String = ""
+    @State private var showDeleteGalleryConfirm: Bool = false
 
     @State private var weatherLocationNameDraft: String = ""
     @State private var weatherLatitudeDraft: String = ""
@@ -478,6 +479,32 @@ struct ContentView: View {
                 }
                 .disabled(manageGallery.isEmpty)
             }
+
+            HStack {
+                Button("New Gallery") {
+                    let name = newGalleryNameForUpload.trimmingCharacters(in: .whitespaces)
+                    guard !name.isEmpty else { return }
+                    Task {
+                        await controller.createGallery(name: name)
+                        newGalleryNameForUpload = ""
+                    }
+                }
+                .disabled(newGalleryNameForUpload.trimmingCharacters(in: .whitespaces).isEmpty)
+                .help("Creates an empty gallery using the name typed above")
+
+                Button("Delete Gallery...", role: .destructive) {
+                    showDeleteGalleryConfirm = true
+                }
+                .disabled(manageGallery.isEmpty)
+            }
+        }
+        .alert("Delete '\(manageGallery)'?", isPresented: $showDeleteGalleryConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task { await controller.deleteGalleryOnDevice(manageGallery) }
+            }
+        } message: {
+            Text("This removes the gallery and every photo in it from the frame. This can't be undone.")
         }
     }
 

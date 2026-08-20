@@ -814,5 +814,50 @@ public final class PhotoController: ObservableObject {
         }
     }
 
+    /// Creates a new, empty gallery on the device. `ensureGallery` is
+    /// best-effort and swallows its own failures (it's normally just a
+    /// convenience side-effect of uploading), so success here is judged by
+    /// whether the name shows up in the refreshed gallery list afterward.
+    public func createGallery(name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            statusText = "Enter a gallery name."
+            return
+        }
+        guard !galleries.contains(trimmed) else {
+            statusText = "'\(trimmed)' already exists."
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        statusText = "→ PUT /gallery?name=\(trimmed)"
+        await client.ensureGallery(ip: settings.deviceIP, name: trimmed)
+        await loadGalleries()
+        statusText = galleries.contains(trimmed)
+            ? "✓ Created '\(trimmed)'"
+            : "✗ Couldn't create '\(trimmed)'"
+    }
+
+    /// Deletes an entire gallery and all its images from the device, and
+    /// drops it from any tab/selection it was part of so the UI doesn't keep
+    /// referencing a gallery that no longer exists.
+    public func deleteGalleryOnDevice(_ name: String) async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            statusText = "→ DELETE /gallery?name=\(name)"
+            try await withWakeRetry { try await client.deleteGallery(ip: settings.deviceIP, name: name) }
+            statusText = "← /gallery OK"
+            settings.selectedGalleries.remove(name)
+            for index in settings.tabs.indices {
+                settings.tabs[index].galleryNames.remove(name)
+            }
+            await loadGalleries()
+            statusText = "✓ Deleted '\(name)'"
+        } catch {
+            statusText = "✗ Couldn't delete '\(name)': \(error.localizedDescription)"
+        }
+    }
+
 
 }

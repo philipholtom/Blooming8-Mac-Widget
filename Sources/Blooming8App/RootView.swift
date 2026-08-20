@@ -13,6 +13,7 @@ struct RootView: View {
     @State private var source: LibrarySource? = .currentPhoto
     @State private var showSettings = false
     @State private var thumbnailSize: Double = 150
+    @State private var showDeleteGalleryConfirm = false
 
     init(settings: AppSettings, controller: PhotoController) {
         self.settings = settings
@@ -57,6 +58,20 @@ struct RootView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsSheet(settings: settings, controller: controller)
+        }
+        .alert("Delete '\(activeGalleryName ?? "")'?", isPresented: $showDeleteGalleryConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                guard let name = activeGalleryName else { return }
+                Task {
+                    await controller.deleteGalleryOnDevice(name)
+                    // The gallery being viewed no longer exists — fall back
+                    // to the frame pane rather than showing an empty grid.
+                    source = nil
+                }
+            }
+        } message: {
+            Text("This removes the gallery and every photo in it from the frame. This can't be undone.")
         }
     }
 
@@ -132,6 +147,22 @@ struct RootView: View {
                 .help("Thumbnail size")
             }
 
+            if let galleryName = activeGalleryName {
+                Menu {
+                    Button("Download Gallery…") {
+                        guard let folder = FilePicker.chooseFolder() else { return }
+                        Task { await controller.downloadGallery(galleryName, to: folder) }
+                    }
+                    Divider()
+                    Button("Delete Gallery…", role: .destructive) {
+                        showDeleteGalleryConfirm = true
+                    }
+                } label: {
+                    Label("Gallery Actions", systemImage: "ellipsis.circle")
+                }
+                .help("Download or delete '\(galleryName)'")
+            }
+
             Button {
                 showSettings = true
             } label: {
@@ -141,6 +172,11 @@ struct RootView: View {
     }
 
     private var activeSource: LibrarySource { source ?? .currentPhoto }
+
+    private var activeGalleryName: String? {
+        guard case .gallery(let name) = activeSource, lockedGalleryTab(name) == nil else { return nil }
+        return name
+    }
 
     private var isGridSource: Bool {
         switch activeSource {

@@ -11,6 +11,9 @@ struct SettingsSheet: View {
     @State private var bleNameDraft = ""
     @State private var nasaKeyDraft = ""
 
+    @State private var newTabName = ""
+    @State private var passwordDrafts: [UUID: String] = [:]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Settings")
@@ -57,6 +60,14 @@ struct SettingsSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                Section("Automatic Random Photo") {
+                    autoRandomSection
+                }
+
+                Section("Tabs") {
+                    tabsSection
+                }
             }
             .formStyle(.grouped)
 
@@ -71,12 +82,149 @@ struct SettingsSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 520, height: 470)
+        .frame(minWidth: 520, idealWidth: 560, minHeight: 470, idealHeight: 640, maxHeight: 800)
         .onAppear {
             ipDraft = settings.deviceIP
             bleNameDraft = settings.bleDeviceName
             nasaKeyDraft = settings.nasaApiKey
         }
+    }
+
+    // MARK: - Automatic random photo
+
+    @ViewBuilder
+    private var autoRandomSection: some View {
+        Toggle("Automatically show a random photo", isOn: $settings.autoRandomEnabled)
+
+        if settings.autoRandomEnabled {
+            Picker("Frequency", selection: $settings.autoRandomInterval) {
+                ForEach(AutoRandomInterval.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+
+            if settings.autoRandomInterval == .daily {
+                DatePicker("At", selection: autoRandomDailyTimeBinding, displayedComponents: .hourAndMinute)
+            }
+        }
+    }
+
+    private var autoRandomDailyTimeBinding: Binding<Date> {
+        Binding(
+            get: {
+                var components = DateComponents()
+                components.hour = settings.autoRandomDailyMinute / 60
+                components.minute = settings.autoRandomDailyMinute % 60
+                return Calendar.current.date(from: components) ?? Date()
+            },
+            set: { newDate in
+                let dc = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                settings.autoRandomDailyMinute = (dc.hour ?? 0) * 60 + (dc.minute ?? 0)
+            }
+        )
+    }
+
+    // MARK: - Tabs
+
+    @ViewBuilder
+    private var tabsSection: some View {
+        Text("Tabs group galleries and can optionally require a password to view. Locking a tab here also hides it from this app's sidebar until unlocked with ⌘⇧L.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        ForEach(settings.tabs) { tab in
+            tabEditor(tab: tab)
+        }
+
+        HStack {
+            TextField("New tab name", text: $newTabName)
+            Button("Add Tab") {
+                let trimmed = newTabName.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else { return }
+                settings.tabs.append(GalleryTab(name: trimmed))
+                newTabName = ""
+            }
+            .disabled(newTabName.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+    }
+
+    private func tabEditor(tab: GalleryTab) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(tab.name).bold()
+                Spacer()
+                Button(role: .destructive) {
+                    deleteTab(tab)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(controller.galleries, id: \.self) { name in
+                    Toggle(name, isOn: tabMembershipBinding(tab: tab, gallery: name))
+                        .toggleStyle(.checkbox)
+                        .font(.caption)
+                }
+            }
+
+            passwordEditor(tab: tab)
+            Divider()
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func passwordEditor(tab: GalleryTab) -> some View {
+        HStack {
+            SecureField(tab.isLocked ? "New password" : "Set password", text: passwordDraftBinding(for: tab))
+            Button(tab.isLocked ? "Update" : "Lock") { setPassword(for: tab) }
+                .disabled((passwordDrafts[tab.id] ?? "").isEmpty)
+            if tab.isLocked {
+                Button("Unlock") { removePassword(for: tab) }
+            }
+        }
+    }
+
+    private func tabMembershipBinding(tab: GalleryTab, gallery: String) -> Binding<Bool> {
+        Binding(
+            get: { tab.galleryNames.contains(gallery) },
+            set: { isMember in
+                guard let index = settings.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+                if isMember {
+                    settings.tabs[index].galleryNames.insert(gallery)
+                } else {
+                    settings.tabs[index].galleryNames.remove(gallery)
+                }
+            }
+        )
+    }
+
+    private func passwordDraftBinding(for tab: GalleryTab) -> Binding<String> {
+        Binding(
+            get: { passwordDrafts[tab.id] ?? "" },
+            set: { passwordDrafts[tab.id] = $0 }
+        )
+    }
+
+    private func setPassword(for tab: GalleryTab) {
+        guard let index = settings.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        let password = passwordDrafts[tab.id] ?? ""
+        guard !password.isEmpty else { return }
+        settings.tabs[index].passwordHash = PasswordHasher.hash(password)
+        passwordDrafts[tab.id] = ""
+        controller.unlockedTabIDs.remove(tab.id) // re-lock immediately under the new password
+    }
+
+    private func removePassword(for tab: GalleryTab) {
+        guard let index = settings.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        settings.tabs[index].passwordHash = nil
+        controller.unlockedTabIDs.remove(tab.id)
+    }
+
+    private func deleteTab(_ tab: GalleryTab) {
+        settings.tabs.removeAll { $0.id == tab.id }
+        controller.unlockedTabIDs.remove(tab.id)
     }
 
     private func save() {
