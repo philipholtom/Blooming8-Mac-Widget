@@ -37,6 +37,17 @@ struct RootView: View {
 
             detail
                 .frame(minWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
+                // The unstyled default here is NSColor.windowBackgroundColor
+                // — deliberately a soft grey "chrome" tone, not meant to be
+                // content itself. textBackgroundColor is the semantic match
+                // for an actual content/document pane (what NSTextView,
+                // Mail's message body, etc. use): near-white in light mode,
+                // and — unlike a literal .white — still correct if the
+                // system is ever in Dark Mode. Sidebar is left as the system
+                // default; a grey sidebar next to a white content pane is
+                // the standard Finder/Mail/Photos convention, not the thing
+                // that reads as "grey" here.
+                .background(Color(nsColor: .textBackgroundColor))
         }
         .toolbar { toolbarContent }
         .navigationTitle(activeSource.title)
