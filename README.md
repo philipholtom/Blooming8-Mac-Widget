@@ -1,35 +1,57 @@
-# Blooming8 Widget
+# Blooming8
 
-A macOS menu bar app for the [BLOOMIN8](https://bloomin8.com/) e-ink photo frame — see what's currently on your frame, and push a random photo to it with one click, right from your menu bar.
+Two macOS apps for the [BLOOMIN8](https://bloomin8.com/) e-ink photo frame, sharing one underlying engine:
+
+- **Blooming8Widget** — a menu bar app for quick actions: see what's on your frame, push a random photo, wake it up, all from a popover without a Dock icon.
+- **Blooming8** — a full windowed app with a sidebar and a real image grid, for actually browsing — a folder of thousands of local photos, a device gallery, or pulling a screenshot from a local video.
+
+Use the widget for quick, everyday actions; use the windowed app when you want to properly look through a folder or gallery.
 
 > 🤖 **This entire project — every line of code, this README included — was built by [Claude Code](https://claude.com/claude-code), Anthropic's AI coding assistant, working from plain-English requests in a chat conversation.** No hand-written Swift went into it.
 
 ## Features
 
-- **Live preview** — shows the photo currently displayed on your frame, pulled straight from the frame's local API.
-- **Random Photo** — pick a random image from one or more galleries on the frame and push it to the frame instantly.
-- **Gallery tabs** — group galleries into named tabs so you're not picking from every gallery at once. Tabs can optionally be locked behind a password (a UI-level deterrent, not real security — see [Security notes](#security-notes)).
-- **Randomize by photo or by gallery** — pool every photo across selected galleries (bigger galleries contribute more candidates), or give every gallery equal odds regardless of size.
-- **Bluetooth wake** — if the frame's Wi‑Fi radio has gone to sleep, the app sends a BLE wake pulse and automatically retries once the frame is reachable again. Also available as a one-click button.
-- **Battery indicator** — see the frame's current battery level at a glance.
-- **Right-click quick menu** — Random Photo, Wake Frame, and Quit, without opening the popover.
+Shared by both apps:
+
+- **Live preview** of what's currently on the frame, and one-click **Random Photo** from selected galleries.
+- **Gallery tabs** — group galleries into named tabs, optionally locked behind a password (a UI-level deterrent, not real security — see [Security notes](#security-notes)).
+- **Randomize by photo or by gallery** — pool every photo across selected galleries, or give every gallery equal odds regardless of size.
+- **Bluetooth wake** — sends a BLE pulse to bring the frame's Wi-Fi radio back up when it's asleep, and retries automatically once it's reachable.
+- **Local Folder** — pick from photos (and videos, in the app) on your Mac instead of a gallery already on the frame.
+- **Favorites** — mark local photos for quick, repeated access without re-browsing.
+- **Crop or letterbox landscape photos** — a landscape photo on the frame's portrait screen can either show in full with black bars, or crop and center to fill the screen (your choice, per-user setting).
+
+Widget-only:
+
+- **Battery indicator** and **right-click quick menu** (Random Photo, Wake Frame, Quit) without opening the popover.
+
+App-only (the windowed app), for cases the popover was never going to handle well:
+
+- **Full image grid** with adjustable thumbnail size and filename search, for folders and galleries with thousands of images.
+- **Multi-select** — Cmd-click to toggle, Shift-click for a range, right-click for bulk send/delete/favorite.
+- **Delete images from a device gallery** directly, with confirmation.
+- **Drag-and-drop upload** onto the grid while browsing a gallery.
+- **Video screenshots** — Local Folder also scans local movies (mp4/mov/m4v); pick a video to pull a handful of frames spread across it, "Next" for a different set, and confirm before sending.
+- **Live "on the frame" badge** on whichever grid cell matches what's currently displayed.
+- Cached gallery listings and thumbnails, so revisiting a folder or gallery you've already opened is instant rather than re-fetching everything.
 
 ## How it works
 
-The BLOOMIN8 frame exposes an  local HTTP API on your Wi-Fi network (no cloud, no auth) — this app talks to it directly:
+The BLOOMIN8 frame exposes an undocumented local HTTP API on your Wi-Fi network (no cloud, no auth) — both apps talk to it directly:
 
 - `GET /deviceInfo` — current photo, active gallery, battery level, device name
 - `GET /gallery/list`, `GET /gallery` — list galleries and their images (with cursor-based pagination for galleries over 51 photos)
 - `POST /show` — display a specific image on the frame
+- `POST /upload`, `POST /image/delete` — add or remove images from a gallery
 
-Since the frame's Wi‑Fi radio sleeps to save battery, waking it requires Bluetooth Low Energy: the app scans for the frame by its advertised BLE name, connects, and writes a short pulse to one of its known GATT characteristics, which brings Wi‑Fi back up.
+Since the frame's Wi-Fi radio sleeps to save battery, waking it requires Bluetooth Low Energy: the app scans for the frame by its advertised BLE name, connects, and writes a short pulse to one of its known GATT characteristics, which brings Wi-Fi back up.
 
 ## Requirements
 
 - macOS 13 or later
 - Xcode Command Line Tools (for the Swift toolchain — `xcode-select --install` if you don't already have it)
 
-No Xcode project is needed; this is a plain Swift Package Manager executable.
+No Xcode project is needed; this is a plain Swift Package Manager workspace.
 
 ## Building & running
 
@@ -39,32 +61,56 @@ cd Blooming8-Mac-Widget
 ./build_app.sh
 ```
 
-`build_app.sh` builds a release binary, packages it into `Blooming8Widget.app`, installs it to `/Applications` (replacing any previous copy), and launches it. Re-run it any time after pulling changes.
+`build_app.sh` builds both apps, packages, codesigns, installs them to `/Applications` (replacing any previous copies), and launches them. Pass `widget` or `app` to build just one:
 
-On first launch, click the menu bar icon and open Settings (gear icon) to enter:
+```sh
+./build_app.sh widget   # just Blooming8Widget.app
+./build_app.sh app      # just Blooming8.app
+./build_app.sh          # both (same as "all")
+```
+
+Re-run any time after pulling changes.
+
+On first launch of either app, open Settings (gear icon) to enter:
 
 - **Frame IP address** — your frame's local network IP (find it via the BLOOMIN8 phone app or your router's device list)
 - **Bluetooth device name** — the frame's advertised BLE name, used to wake it when asleep
 
-To launch automatically at login, add `/Applications/Blooming8Widget.app` in System Settings → General → Login Items.
+Settings are shared between both apps (one `UserDefaults` suite) — configure either one and the other picks it up.
+
+To launch the widget automatically at login, add `/Applications/Blooming8Widget.app` in System Settings → General → Login Items.
 
 ## Security notes
 
-- The frame's HTTP API has no authentication of its own — anyone on your local network can talk to it directly. This app doesn't add any security to the frame itself.
-- Gallery tab passwords are a convenience feature only: they gate the app's UI (so a locked tab's galleries won't show or get randomized until unlocked) but don't touch the frame's actual access control. Don't rely on them for genuinely sensitive photos.
+- The frame's HTTP API has no authentication of its own — anyone on your local network can talk to it directly. Neither app adds any security to the frame itself.
+- Gallery tab passwords and the Local Folder password are convenience features only: they gate each app's own UI (a locked tab's galleries won't show, randomize, or browse until unlocked) but don't touch the frame's actual access control. Don't rely on them for genuinely sensitive photos.
+- Unlocking a tab is per-app-process and in-memory only — unlocking it in the widget doesn't unlock it in the windowed app, or vice versa, and it re-locks on relaunch.
 
 ## Project structure
 
 ```
-Sources/Blooming8Widget/
-  main.swift            entry point
-  AppDelegate.swift      menu bar item, popover, right-click menu
-  ContentView.swift       the popover UI
-  PhotoController.swift   app state and business logic
-  Settings.swift          persisted settings (UserDefaults)
-  GalleryTab.swift        gallery tab / password model
-  BloominClient.swift     the frame's local HTTP API client
-  BLEWaker.swift          CoreBluetooth wake pulse
-Resources/AppIcon.icns   app icon
-build_app.sh              build, package, install, and relaunch
+Sources/Blooming8Core/       shared engine — device client, controller, settings, BLE wake, content sources
+  BloominClient.swift          the frame's local HTTP API client
+  PhotoController.swift        app state and business logic
+  AppSettings.swift            persisted settings (shared UserDefaults suite)
+  GalleryTab.swift             gallery tab / password model
+  BLEWaker.swift                CoreBluetooth wake pulse
+  ImageFolder.swift             local image scanning + thumbnail caching
+  VideoFrames.swift             local video scanning + frame extraction
+  ContentRendering.swift        image compositing (letterbox/crop-fill, generated content)
+  *Source.swift                 generated content sources (weather, moon phase, fortune, ...)
+
+Sources/Blooming8Widget/     the menu bar app
+  main.swift, AppDelegate.swift  entry point, status item, popover
+  ContentView.swift               the popover UI
+
+Sources/Blooming8App/        the windowed app
+  Blooming8AppMain.swift          entry point, window/scene setup
+  RootView.swift, Sidebar.swift   sidebar navigation
+  LibraryModel.swift, LibraryGrid.swift, InspectorPane.swift   the image grid + detail pane
+  VideoFramePickerSheet.swift     video screenshot picker
+  SettingsSheet.swift, LockedGalleryPrompt.swift
+
+Resources/AppIcon.icns       shared app icon
+build_app.sh                  build, package, codesign, install, and relaunch
 ```
