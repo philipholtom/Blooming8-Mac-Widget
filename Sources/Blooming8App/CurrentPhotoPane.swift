@@ -44,6 +44,20 @@ struct CurrentPhotoPane: View {
                         .truncationMode(.middle)
                 }
 
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Randomize by")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("Randomize by", selection: $settings.randomWeighting) {
+                        ForEach(RandomWeighting.allCases) { option in
+                            Text(option.label).tag(option)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 260)
+                }
+
                 HStack(spacing: 10) {
                     Button {
                         Task { await controller.showRandomPhoto() }

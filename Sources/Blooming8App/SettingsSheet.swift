@@ -11,6 +11,16 @@ struct SettingsSheet: View {
     @State private var bleNameDraft = ""
     @State private var nasaKeyDraft = ""
 
+    @State private var deviceNameDraft = ""
+    @State private var maxIdleMinutesDraft = ""
+    @State private var sleepDurationHoursDraft = ""
+    @State private var wakeSensitivityDraft = ""
+
+    @State private var weatherLocationNameDraft = ""
+    @State private var weatherLatitudeDraft = ""
+    @State private var weatherLongitudeDraft = ""
+    @State private var historyHighlightYearDraft = ""
+
     @State private var newTabName = ""
     @State private var passwordDrafts: [UUID: String] = [:]
     @State private var newLocalFolderPassword = ""
@@ -64,6 +74,21 @@ struct SettingsSheet: View {
                     Text("Used for Photo of the Day. The public demo key is rate-limited.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    TextField("Weather location name", text: $weatherLocationNameDraft)
+                    HStack {
+                        TextField("Latitude", text: $weatherLatitudeDraft)
+                        TextField("Longitude", text: $weatherLongitudeDraft)
+                    }
+
+                    TextField("History highlight year", text: $historyHighlightYearDraft, prompt: Text("1979"))
+                    Text("If today has a historical event from this year, it's always shown first.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Device") {
+                    deviceSettingsSection
                 }
 
                 Section("Automatic Random Photo") {
@@ -92,6 +117,61 @@ struct SettingsSheet: View {
             ipDraft = settings.deviceIP
             bleNameDraft = settings.bleDeviceName
             nasaKeyDraft = settings.nasaApiKey
+            deviceNameDraft = controller.deviceName ?? ""
+            maxIdleMinutesDraft = controller.maxIdleSeconds.map { String($0 / 60) } ?? ""
+            sleepDurationHoursDraft = controller.sleepDurationSeconds.map { String($0 / 3600) } ?? ""
+            wakeSensitivityDraft = controller.wakeSensitivity.map(String.init) ?? ""
+            weatherLocationNameDraft = settings.weatherLocationName
+            weatherLatitudeDraft = String(settings.weatherLatitude)
+            weatherLongitudeDraft = String(settings.weatherLongitude)
+            historyHighlightYearDraft = String(settings.historyHighlightYear)
+        }
+    }
+
+    // MARK: - Device settings (pushed to the frame itself, not just local)
+
+    private var deviceSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Applied directly to the frame, not just saved locally.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("Device name", text: $deviceNameDraft)
+
+            HStack {
+                Text("Auto-sleep after")
+                TextField("min", text: $maxIdleMinutesDraft)
+                    .frame(width: 50)
+                Text("min").foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("Deep sleep every")
+                TextField("hrs", text: $sleepDurationHoursDraft)
+                    .frame(width: 50)
+                Text("hours").foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("Wake sensitivity")
+                TextField("", text: $wakeSensitivityDraft)
+                    .frame(width: 50)
+            }
+
+            Button("Update Device Settings") {
+                Task {
+                    await controller.updateDeviceSettings(
+                        name: deviceNameDraft.trimmingCharacters(in: .whitespaces).isEmpty ? nil : deviceNameDraft,
+                        sleepDurationSeconds: Int(sleepDurationHoursDraft).map { $0 * 3600 },
+                        maxIdleSeconds: Int(maxIdleMinutesDraft).map { $0 * 60 },
+                        wakeSensitivity: Int(wakeSensitivityDraft)
+                    )
+                    deviceNameDraft = controller.deviceName ?? ""
+                    maxIdleMinutesDraft = controller.maxIdleSeconds.map { String($0 / 60) } ?? ""
+                    sleepDurationHoursDraft = controller.sleepDurationSeconds.map { String($0 / 3600) } ?? ""
+                    wakeSensitivityDraft = controller.wakeSensitivity.map(String.init) ?? ""
+                }
+            }
         }
     }
 
@@ -281,6 +361,10 @@ struct SettingsSheet: View {
         settings.bleDeviceName = bleNameDraft.trimmingCharacters(in: .whitespaces)
         let key = nasaKeyDraft.trimmingCharacters(in: .whitespaces)
         settings.nasaApiKey = key.isEmpty ? "DEMO_KEY" : key
+        settings.weatherLocationName = weatherLocationNameDraft.trimmingCharacters(in: .whitespaces)
+        if let lat = Double(weatherLatitudeDraft) { settings.weatherLatitude = lat }
+        if let lon = Double(weatherLongitudeDraft) { settings.weatherLongitude = lon }
+        if let year = Int(historyHighlightYearDraft) { settings.historyHighlightYear = year }
         dismiss()
         Task {
             await controller.refreshCurrentPhoto()
