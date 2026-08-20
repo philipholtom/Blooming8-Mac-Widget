@@ -51,6 +51,13 @@ struct RootView: View {
         .onChange(of: source) { newValue in
             let resolved = newValue ?? .currentPhoto
             Self.log.notice("sidebar: selected \(resolved.title, privacy: .public)")
+            // Re-lock on the way out, matching the widget: leaving both
+            // Local Folder and Favorites means the next visit re-prompts,
+            // rather than staying unlocked for the rest of the session just
+            // because it was entered once.
+            if resolved != .localFolder, resolved != .favorites {
+                controller.isLocalFolderUnlocked = false
+            }
             library.load(resolved)
         }
         .onChange(of: settings.favoriteImagePaths) { _ in
@@ -79,9 +86,15 @@ struct RootView: View {
     private var detail: some View {
         if case .gallery(let name) = activeSource, let lockedTab = lockedGalleryTab(name) {
             LockedGalleryPrompt(tab: lockedTab, controller: controller)
+        } else if isLocalFolderSource, settings.localFolderLocked, !controller.isLocalFolderUnlocked {
+            LockedLocalFolderPrompt(settings: settings, controller: controller)
         } else {
             detailForUnlockedSource
         }
+    }
+
+    private var isLocalFolderSource: Bool {
+        activeSource == .localFolder || activeSource == .favorites
     }
 
     @ViewBuilder

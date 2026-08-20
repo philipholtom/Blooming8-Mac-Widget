@@ -23,6 +23,15 @@ public final class PhotoController: ObservableObject {
     @Published public var isBusy: Bool = false
     /// Tabs unlocked this app session (in-memory only — re-locks on relaunch).
     @Published public var unlockedTabIDs: Set<UUID> = []
+    /// Whether the shared Local Folder / Favorites password has been entered
+    /// this app session (in-memory only — re-locks on relaunch, same as
+    /// `unlockedTabIDs`). One password gates both, since they're really the
+    /// same "your private local photos" concern — unlocking either one in
+    /// the windowed app unlocks both there. The widget uses
+    /// `settings.localFolderLocked`/`localFolderPasswordHash` too, but only
+    /// gates its own Local Folder tab; this doesn't reach into the widget's
+    /// separate per-process unlock state, same as tab unlocking doesn't.
+    @Published public var isLocalFolderUnlocked: Bool = false
     /// Whether locked tabs are currently shown in the tab bar at all — off by
     /// default so they don't appear to a casual viewer of the popover, toggled
     /// with a keyboard shortcut, and reset to hidden whenever the popover

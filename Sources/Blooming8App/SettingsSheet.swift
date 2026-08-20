@@ -13,6 +13,7 @@ struct SettingsSheet: View {
 
     @State private var newTabName = ""
     @State private var passwordDrafts: [UUID: String] = [:]
+    @State private var newLocalFolderPassword = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -52,6 +53,10 @@ struct SettingsSheet: View {
                             }
                         }
                     }
+                }
+
+                Section("Local Folder & Favorites Password") {
+                    localFolderPasswordSection
                 }
 
                 Section("Generated Content") {
@@ -146,6 +151,50 @@ struct SettingsSheet: View {
             }
             .disabled(newTabName.trimmingCharacters(in: .whitespaces).isEmpty)
         }
+    }
+
+    // MARK: - Local Folder / Favorites password
+
+    /// One password protects both Local Folder and Favorites in this app —
+    /// they're really the same "your private local photos" concern, so
+    /// there's a single lock rather than two to manage separately. Shares
+    /// storage (settings.localFolderLocked/localFolderPasswordHash) with the
+    /// widget's own Local Folder lock, but unlocking in one app doesn't
+    /// unlock the other — see PhotoController.isLocalFolderUnlocked.
+    @ViewBuilder
+    private var localFolderPasswordSection: some View {
+        if settings.localFolderLocked {
+            Text("Local Folder and Favorites are locked behind this password in this app — unlock either from its lock icon in the sidebar.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            SecureField("New password", text: $newLocalFolderPassword)
+            HStack {
+                Button("Update Password") { setLocalFolderPassword() }
+                    .disabled(newLocalFolderPassword.isEmpty)
+                Button("Remove Password", role: .destructive) { removeLocalFolderPassword() }
+            }
+        } else {
+            Text("Set a password to hide Local Folder and Favorites behind a lock icon in the sidebar.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            SecureField("Set password", text: $newLocalFolderPassword)
+            Button("Set Password") { setLocalFolderPassword() }
+                .disabled(newLocalFolderPassword.isEmpty)
+        }
+    }
+
+    private func setLocalFolderPassword() {
+        guard !newLocalFolderPassword.isEmpty else { return }
+        settings.localFolderPasswordHash = PasswordHasher.hash(newLocalFolderPassword)
+        settings.localFolderLocked = true
+        newLocalFolderPassword = ""
+        controller.isLocalFolderUnlocked = false // re-lock immediately under the new password
+    }
+
+    private func removeLocalFolderPassword() {
+        settings.localFolderLocked = false
+        settings.localFolderPasswordHash = nil
+        controller.isLocalFolderUnlocked = false
     }
 
     private func tabEditor(tab: GalleryTab) -> some View {

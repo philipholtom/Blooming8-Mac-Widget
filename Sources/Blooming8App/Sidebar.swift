@@ -32,8 +32,8 @@ struct Sidebar: View {
                     row(.currentPhoto)
 
                     sectionHeader("Library")
-                    row(.localFolder)
-                    row(.favorites, badge: settings.favoriteImagePaths.count)
+                    row(.localFolder, isLocked: isLocalFolderLocked)
+                    row(.favorites, badge: settings.favoriteImagePaths.count, isLocked: isLocalFolderLocked)
                     row(.generated)
 
                     galleriesHeader
@@ -152,6 +152,10 @@ struct Sidebar: View {
 
     private func lockedTab(for galleryName: String) -> GalleryTab? {
         settings.lockedTab(for: galleryName, unlockedTabIDs: controller.unlockedTabIDs)
+    }
+
+    private var isLocalFolderLocked: Bool {
+        settings.localFolderLocked && !controller.isLocalFolderUnlocked
     }
 
     /// A plain tappable row rather than `List(selection:)`. That binding
