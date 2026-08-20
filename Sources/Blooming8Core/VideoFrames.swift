@@ -40,8 +40,14 @@ public enum VideoFrameExtractor {
         return generator
     }
 
-    /// `count` frames sampled evenly across the video, skipping a small
-    /// margin at the very start and end — often a black frame or a fade.
+    /// `count` frames spread across the video, skipping a small margin at
+    /// the very start and end — often a black frame or a fade. The video is
+    /// divided into `count` equal-width slots and one frame is picked at a
+    /// random point within each — not at a fixed position within it — so a
+    /// repeat call (the frame picker's "Next" button) returns a genuinely
+    /// different set of moments instead of the exact same 9 frames, while
+    /// each set still covers the whole video rather than clustering, the
+    /// way a fully random draw could.
     public static func extractFrames(from url: URL, count: Int = 9, maxPixelSize: CGFloat = 800) async -> [NSImage] {
         guard let duration = try? await AVURLAsset(url: url).load(.duration),
               duration.isValid, duration.seconds > 0
@@ -50,9 +56,13 @@ public enum VideoFrameExtractor {
         let totalSeconds = duration.seconds
         let margin = totalSeconds * 0.05
         let usableRange = max(totalSeconds - margin * 2, 0.1)
+        let slotWidth = usableRange / Double(count)
         let times: [CMTime] = (0..<count).map { i in
-            let fraction = count > 1 ? Double(i) / Double(count - 1) : 0.5
-            return CMTime(seconds: margin + fraction * usableRange, preferredTimescale: 600)
+            let slotStart = margin + Double(i) * slotWidth
+            // Stays off both edges of its slot so consecutive frames can't
+            // land right next to each other by chance.
+            let offset = Double.random(in: 0.15...0.85) * slotWidth
+            return CMTime(seconds: slotStart + offset, preferredTimescale: 600)
         }
 
         // AVAssetImageGenerator's per-frame call is synchronous and blocking
