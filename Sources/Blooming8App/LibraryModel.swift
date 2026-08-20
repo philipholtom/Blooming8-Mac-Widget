@@ -33,9 +33,9 @@ enum LibrarySource: Hashable {
     }
 }
 
-/// One browsable item: an image (local file or already on the frame) or a
-/// local video, which isn't sent directly — picking one opens a frame picker
-/// (`VideoFramePickerSheet`) instead of Send to Frame.
+/// One browsable item: an image (local file, already on the frame, or a
+/// local video). A video isn't sent directly — picking one opens a frame
+/// picker (`VideoFramePickerSheet`) instead of Send to Frame.
 struct LibraryItem: Identifiable, Hashable {
     enum Kind {
         case image
@@ -45,6 +45,10 @@ struct LibraryItem: Identifiable, Hashable {
     let id: String
     let url: URL?
     let devicePath: String?
+    /// Set only for device-hosted items, alongside `devicePath` — carried
+    /// separately rather than re-parsed out of the path string, since
+    /// deleting an image needs the gallery name and bare filename apart.
+    let galleryName: String?
     let name: String
     let kind: Kind
 
@@ -52,14 +56,16 @@ struct LibraryItem: Identifiable, Hashable {
         self.id = localURL.path
         self.url = localURL
         self.devicePath = nil
+        self.galleryName = nil
         self.name = localURL.lastPathComponent
         self.kind = kind
     }
 
-    init(devicePath: String) {
+    init(devicePath: String, galleryName: String) {
         self.id = devicePath
         self.url = nil
         self.devicePath = devicePath
+        self.galleryName = galleryName
         self.name = (devicePath as NSString).lastPathComponent
         self.kind = .image
     }
@@ -78,8 +84,15 @@ final class LibraryModel: ObservableObject {
     @Published var items: [LibraryItem] = []
     @Published var isLoading = false
     @Published var loadError: String?
+    /// The single item the inspector shows. Plain click sets this (and
+    /// clears `selectedIDs` down to just that one item); it's kept separate
+    /// from multi-select so the inspector always has one unambiguous subject.
     @Published var selection: LibraryItem.ID?
+    /// Cmd/Shift-click multi-selection, for bulk favorite/delete. Always a
+    /// superset containing `selection` when both are non-empty.
+    @Published var selectedIDs: Set<LibraryItem.ID> = []
     @Published var searchText: String = ""
+    private(set) var currentSource: LibrarySource?
 
     private let settings: AppSettings
     private let controller: PhotoController
@@ -110,10 +123,18 @@ final class LibraryModel: ObservableObject {
         return items.first { $0.id == selection }
     }
 
+    /// The actual selected items, in the same order they appear in the grid
+    /// — used for bulk actions and for Shift-click range extension.
+    var selectedItems: [LibraryItem] {
+        filteredItems.filter { selectedIDs.contains($0.id) }
+    }
+
     func load(_ source: LibrarySource) {
         Self.log.notice("load: \(source.title, privacy: .public)")
         loadTask?.cancel()
+        currentSource = source
         selection = nil
+        selectedIDs = []
         loadError = nil
 
         switch source {
@@ -136,6 +157,41 @@ final class LibraryModel: ObservableObject {
 
         case .gallery(let name):
             loadGallery(named: name)
+        }
+    }
+
+    /// Click-selection with Cmd (toggle) / Shift (range from the last
+    /// anchor) support, matching the standard macOS Finder-grid convention.
+    func selectItem(_ item: LibraryItem, extendWithCommand: Bool, extendWithShift: Bool) {
+        if extendWithShift, let anchor = selection,
+           let anchorIndex = filteredItems.firstIndex(where: { $0.id == anchor }),
+           let targetIndex = filteredItems.firstIndex(where: { $0.id == item.id }) {
+            let range = anchorIndex < targetIndex ? anchorIndex...targetIndex : targetIndex...anchorIndex
+            selectedIDs.formUnion(filteredItems[range].map(\.id))
+            return
+        }
+        if extendWithCommand {
+            if selectedIDs.contains(item.id) {
+                selectedIDs.remove(item.id)
+                if selection == item.id { selection = selectedIDs.first }
+            } else {
+                selectedIDs.insert(item.id)
+                selection = item.id
+            }
+            return
+        }
+        selection = item.id
+        selectedIDs = [item.id]
+    }
+
+    /// Removes an item from `items` (and, for a gallery, its cache) after a
+    /// successful delete on the frame — without waiting on a full reload.
+    func removeItem(_ item: LibraryItem) {
+        items.removeAll { $0.id == item.id }
+        selectedIDs.remove(item.id)
+        if selection == item.id { selection = nil }
+        if let galleryName = item.galleryName {
+            galleryListingCache[galleryName]?.removeAll { $0 == item.name }
         }
     }
 
@@ -165,7 +221,7 @@ final class LibraryModel: ObservableObject {
         // to since your last visit still catches up, just without making
         // every single click wait on the device's slow listing endpoint.
         if let cachedNames = galleryListingCache[name] {
-            items = cachedNames.map { LibraryItem(devicePath: "/gallerys/\(name)/\($0)") }
+            items = cachedNames.map { LibraryItem(devicePath: "/gallerys/\(name)/\($0)", galleryName: name) }
             isLoading = false
             loadError = items.isEmpty ? "This gallery is empty." : nil
         } else {
@@ -178,7 +234,7 @@ final class LibraryModel: ObservableObject {
                 let names = try await client.fetchAllImages(ip: settings.deviceIP, gallery: name)
                 guard !Task.isCancelled else { return }
                 galleryListingCache[name] = names
-                items = names.map { LibraryItem(devicePath: "/gallerys/\(name)/\($0)") }
+                items = names.map { LibraryItem(devicePath: "/gallerys/\(name)/\($0)", galleryName: name) }
                 isLoading = false
                 loadError = items.isEmpty ? "This gallery is empty." : nil
             } catch {

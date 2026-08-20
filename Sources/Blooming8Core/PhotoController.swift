@@ -493,6 +493,23 @@ public final class PhotoController: ObservableObject {
         }
     }
 
+    /// Deletes a single image from a gallery on the device. Returns whether
+    /// it succeeded so a caller browsing that gallery can remove it from its
+    /// own list without a full reload.
+    @discardableResult
+    public func deleteDeviceImage(gallery: String, filename: String) async -> Bool {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await withWakeRetry { try await client.deleteImage(ip: settings.deviceIP, filename: filename, gallery: gallery) }
+            statusText = "✓ Deleted \(filename)"
+            return true
+        } catch {
+            statusText = "✗ Couldn't delete \(filename): \(error.localizedDescription)"
+            return false
+        }
+    }
+
     public func showRandomPhoto() async {
         let galleriesToUse = settings.selectedGalleries.intersection(availableGalleryNames)
         guard !galleriesToUse.isEmpty else {

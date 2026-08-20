@@ -62,6 +62,15 @@ struct RootView: View {
 
     @ViewBuilder
     private var detail: some View {
+        if case .gallery(let name) = activeSource, let lockedTab = lockedGalleryTab(name) {
+            LockedGalleryPrompt(tab: lockedTab, controller: controller)
+        } else {
+            detailForUnlockedSource
+        }
+    }
+
+    @ViewBuilder
+    private var detailForUnlockedSource: some View {
         switch activeSource {
         case .currentPhoto:
             CurrentPhotoPane(controller: controller, settings: settings)
@@ -83,6 +92,15 @@ struct RootView: View {
                 }
             }
         }
+    }
+
+    /// The still-locked tab a gallery belongs to, if `activeSource` is that
+    /// gallery and it hasn't been unlocked this session. Checked here rather
+    /// than at the sidebar-click site: `unlockedTabIDs` can change (via
+    /// `LockedGalleryPrompt`) without `source` itself changing, so the detail
+    /// view needs to re-evaluate on every render, not just once per click.
+    private func lockedGalleryTab(_ name: String) -> GalleryTab? {
+        settings.lockedTab(for: name, unlockedTabIDs: controller.unlockedTabIDs)
     }
 
     @ToolbarContentBuilder

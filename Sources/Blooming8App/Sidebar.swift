@@ -35,7 +35,7 @@ struct Sidebar: View {
                     if !visibleGalleries.isEmpty {
                         sectionHeader("Galleries")
                         ForEach(visibleGalleries, id: \.self) { name in
-                            row(.gallery(name))
+                            row(.gallery(name), isLocked: lockedTab(for: name) != nil)
                         }
                     }
                 }
@@ -46,6 +46,17 @@ struct Sidebar: View {
 
             statusFooter
         }
+        // Invisible — mirrors the widget's ⌘⇧L: reveals galleries behind a
+        // still-locked tab (with a lock icon) without a visible control
+        // anyone could stumble onto. Selecting one still requires the
+        // password (RootView routes to LockedGalleryPrompt); this only
+        // controls whether the row appears at all.
+        .background(
+            Button("") { controller.showHiddenTabs.toggle() }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+                .opacity(0)
+                .accessibilityHidden(true)
+        )
     }
 
     private func sectionHeader(_ title: String) -> some View {
@@ -56,15 +67,21 @@ struct Sidebar: View {
             .padding(.top, 4)
     }
 
-    /// Galleries assigned to a locked tab stay hidden until that tab is
-    /// unlocked, matching the widget's behaviour — otherwise the app would be
-    /// a trivial way around the widget's tab passwords.
+    /// Galleries assigned to a still-locked tab stay hidden until ⌘⇧L
+    /// reveals them (matching the widget's tab bar), and even then still
+    /// require the password to actually open — selecting one routes to
+    /// `LockedGalleryPrompt` rather than the grid until it's unlocked.
     private var visibleGalleries: [String] {
+        guard !controller.showHiddenTabs else { return controller.galleries }
         let lockedNames = settings.tabs
             .filter { $0.isLocked && !controller.unlockedTabIDs.contains($0.id) }
             .flatMap(\.galleryNames)
         let hidden = Set(lockedNames)
         return controller.galleries.filter { !hidden.contains($0) }
+    }
+
+    private func lockedTab(for galleryName: String) -> GalleryTab? {
+        settings.lockedTab(for: galleryName, unlockedTabIDs: controller.unlockedTabIDs)
     }
 
     /// A plain tappable row rather than `List(selection:)`. That binding
@@ -77,16 +94,16 @@ struct Sidebar: View {
     /// fix and is kept because it's simpler than `List(selection:)` for a
     /// fixed set of rows regardless.
     @ViewBuilder
-    private func row(_ item: LibrarySource, badge: Int? = nil) -> some View {
+    private func row(_ item: LibrarySource, badge: Int? = nil, isLocked: Bool = false) -> some View {
         if #available(macOS 14.0, *) {
-            rowButton(item, badge: badge)
+            rowButton(item, badge: badge, isLocked: isLocked)
                 .focusEffectDisabled()
         } else {
-            rowButton(item, badge: badge)
+            rowButton(item, badge: badge, isLocked: isLocked)
         }
     }
 
-    private func rowButton(_ item: LibrarySource, badge: Int?) -> some View {
+    private func rowButton(_ item: LibrarySource, badge: Int?, isLocked: Bool) -> some View {
         let isSelected = source == item
         return Button {
             Self.log.notice("row tapped: \(item.title, privacy: .public)")
@@ -96,6 +113,11 @@ struct Sidebar: View {
                 Image(systemName: item.symbol)
                     .frame(width: 18)
                 Text(item.title)
+                if isLocked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 if let badge, badge > 0 {
                     Text("\(badge)")

@@ -12,6 +12,19 @@ struct LibraryGrid: View {
     /// aren't sent directly — there's no single "the" frame to upload — so a
     /// tap here bypasses `library.selection`/Send entirely.
     @State private var videoForFramePicker: LibraryItem?
+    /// Items awaiting the "delete from frame" confirmation — non-nil shows
+    /// the alert. A destructive, one-way action on the device, so it's
+    /// confirmed regardless of whether it's one image or a whole selection.
+    @State private var pendingDeletion: [LibraryItem]?
+    @State private var isDropTargeted = false
+
+    /// The gallery currently being browsed, if any — used both to know
+    /// whether a drop here means "upload into this gallery" and to refresh
+    /// the listing afterward.
+    private var currentGalleryName: String? {
+        if case .gallery(let name) = library.currentSource { return name }
+        return nil
+    }
 
     var body: some View {
         Group {
@@ -33,6 +46,37 @@ struct LibraryGrid: View {
                 VideoFramePickerSheet(videoURL: url, controller: controller)
             }
         }
+        .alert(
+            deletionAlertTitle,
+            isPresented: Binding(get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } })
+        ) {
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+            Button("Delete", role: .destructive) {
+                let items = pendingDeletion ?? []
+                pendingDeletion = nil
+                Task { await deleteFromFrame(items) }
+            }
+        } message: {
+            Text("This removes \(pendingDeletion?.count == 1 ? "this image" : "these images") from the frame. This can't be undone.")
+        }
+        .overlay {
+            if isDropTargeted, currentGalleryName != nil {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.accentColor, lineWidth: 3)
+                    .background(Color.accentColor.opacity(0.08))
+                    .overlay {
+                        Label("Drop to upload to '\(currentGalleryName ?? "")'", systemImage: "square.and.arrow.up")
+                            .font(.headline)
+                            .padding(12)
+                            .background(.regularMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .allowsHitTesting(false)
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleDrop(providers)
+        }
     }
 
     private var grid: some View {
@@ -48,14 +92,20 @@ struct LibraryGrid: View {
                     LibraryCell(
                         item: item,
                         size: thumbnailSize,
-                        isSelected: library.selection == item.id,
+                        isSelected: library.selectedIDs.contains(item.id),
+                        isCurrentOnFrame: item.devicePath != nil && item.devicePath == controller.currentImagePath,
                         settings: settings
                     )
                     .onTapGesture {
                         if item.isVideo {
                             videoForFramePicker = item
                         } else {
-                            library.selection = item.id
+                            let flags = NSEvent.modifierFlags
+                            library.selectItem(
+                                item,
+                                extendWithCommand: flags.contains(.command),
+                                extendWithShift: flags.contains(.shift)
+                            )
                         }
                     }
                     .contextMenu { contextMenu(for: item) }
@@ -67,13 +117,31 @@ struct LibraryGrid: View {
 
     @ViewBuilder
     private func contextMenu(for item: LibraryItem) -> some View {
+        // Right-clicking an item that's part of a larger active selection
+        // acts on the whole selection, matching Finder; otherwise it acts on
+        // just the item under the pointer.
+        let isBulk = library.selectedIDs.contains(item.id) && library.selectedIDs.count > 1
+        let targets = isBulk ? library.selectedItems : [item]
+
         if item.isVideo {
             Button("Pick a Frame to Send…") { videoForFramePicker = item }
+        } else if isBulk {
+            Button("Send \(targets.count) to Frame") {
+                for target in targets { send(target) }
+            }
         } else {
             Button("Send to Frame") { send(item) }
         }
 
-        if let url = item.url {
+        let deletableTargets = targets.filter { $0.galleryName != nil }
+        if !deletableTargets.isEmpty {
+            Divider()
+            Button(deletableTargets.count == 1 ? "Delete from Frame…" : "Delete \(deletableTargets.count) from Frame…", role: .destructive) {
+                pendingDeletion = deletableTargets
+            }
+        }
+
+        if let url = item.url, !isBulk {
             Divider()
             Button("Reveal in Finder") {
                 NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
@@ -94,6 +162,30 @@ struct LibraryGrid: View {
                     }
                 }
             }
+        } else if isBulk {
+            let favoritable = targets.filter { $0.url != nil && !$0.isVideo }
+            if !favoritable.isEmpty {
+                Divider()
+                Button("Add \(favoritable.count) to Favorites") {
+                    for target in favoritable {
+                        guard let path = target.url?.path, !settings.favoriteImagePaths.contains(path) else { continue }
+                        settings.favoriteImagePaths.append(path)
+                    }
+                }
+            }
+        }
+    }
+
+    private var deletionAlertTitle: String {
+        let count = pendingDeletion?.count ?? 0
+        return count == 1 ? "Delete this image?" : "Delete \(count) images?"
+    }
+
+    private func deleteFromFrame(_ items: [LibraryItem]) async {
+        for item in items {
+            guard let gallery = item.galleryName else { continue }
+            let ok = await controller.deleteDeviceImage(gallery: gallery, filename: item.name)
+            if ok { library.removeItem(item) }
         }
     }
 
@@ -112,6 +204,36 @@ struct LibraryGrid: View {
                 }
             } else if let devicePath = item.devicePath {
                 await controller.showImageAtPath(devicePath)
+            }
+        }
+    }
+
+    /// Drops onto the grid upload into whichever device gallery is currently
+    /// open — dropping onto Local Folder or Favorites (both read from disk,
+    /// not upload targets) is a no-op.
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let galleryName = currentGalleryName else { return false }
+        guard !providers.isEmpty else { return false }
+
+        Task {
+            var urls: [URL] = []
+            for provider in providers {
+                guard let url = await loadFileURL(provider) else { continue }
+                if ImageFolder.imageFileExtensions.contains(url.pathExtension.lowercased()) {
+                    urls.append(url)
+                }
+            }
+            guard !urls.isEmpty else { return }
+            await controller.uploadPhotos(urls: urls, gallery: galleryName)
+            library.load(.gallery(galleryName))
+        }
+        return true
+    }
+
+    private func loadFileURL(_ provider: NSItemProvider) async -> URL? {
+        await withCheckedContinuation { continuation in
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                continuation.resume(returning: url)
             }
         }
     }
@@ -153,6 +275,9 @@ struct LibraryGrid: View {
     }
 
     private var countLabel: String {
+        if library.selectedIDs.count > 1 {
+            return "\(library.selectedIDs.count) selected"
+        }
         let shown = library.filteredItems.count
         let total = library.items.count
         let videoCount = library.items.filter(\.isVideo).count
@@ -171,6 +296,7 @@ private struct LibraryCell: View {
     let item: LibraryItem
     let size: Double
     let isSelected: Bool
+    let isCurrentOnFrame: Bool
     @ObservedObject var settings: AppSettings
 
     @State private var image: NSImage?
@@ -207,6 +333,18 @@ private struct LibraryCell: View {
                     Image(systemName: "play.circle.fill")
                         .font(.system(size: 22))
                         .foregroundStyle(.white, .black.opacity(0.4))
+                }
+
+                if isCurrentOnFrame {
+                    Text("ON FRAME")
+                        .font(.system(size: 8, weight: .bold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.green)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                        .padding(4)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
             }
             .frame(height: size)

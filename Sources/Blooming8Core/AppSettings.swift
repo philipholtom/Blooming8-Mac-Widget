@@ -216,3 +216,15 @@ public final class AppSettings: ObservableObject {
         }
     }
 }
+
+extension AppSettings {
+    /// The tab a gallery belongs to that's still locked (its password hasn't
+    /// been entered this session), if any. `unlockedTabIDs` lives on
+    /// `PhotoController`, not here, since it's per-process runtime state,
+    /// not a persisted setting — callers pass it in.
+    public func lockedTab(for galleryName: String, unlockedTabIDs: Set<UUID>) -> GalleryTab? {
+        tabs.first {
+            $0.isLocked && !unlockedTabIDs.contains($0.id) && $0.galleryNames.contains(galleryName)
+        }
+    }
+}
