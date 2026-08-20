@@ -1,3 +1,4 @@
+import Blooming8Core
 import AppKit
 import SwiftUI
 import Combine
@@ -7,7 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var contentView: ContentView?
-    private let settings = Settings()
+    private let settings = AppSettings()
     private lazy var controller = PhotoController(settings: settings)
     private var activityToken: NSObjectProtocol?
     private var awakeStatusCancellable: AnyCancellable?

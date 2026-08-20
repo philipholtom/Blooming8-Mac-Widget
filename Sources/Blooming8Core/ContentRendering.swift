@@ -5,8 +5,8 @@ import ImageIO
 /// PIL-based rendering in the original Python scripts. Uses a top-left
 /// origin (Y increases downward) so coordinates match the Python code
 /// almost 1:1.
-enum ImageCanvas {
-    static func render(width: Int, height: Int, draw: () -> Void) -> NSImage? {
+public enum ImageCanvas {
+    public static func render(width: Int, height: Int, draw: () -> Void) -> NSImage? {
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(
                 data: nil,
@@ -42,7 +42,7 @@ enum ImageCanvas {
 
     /// Baseline (non-progressive) JPEG at the given quality, matching the
     /// Python scripts' `quality=95, progressive=False` output.
-    static func jpegData(_ image: NSImage, quality: CGFloat = 0.95) -> Data? {
+    public static func jpegData(_ image: NSImage, quality: CGFloat = 0.95) -> Data? {
         guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else {
             return nil
         }
@@ -58,7 +58,7 @@ enum ImageCanvas {
 /// regardless of the ambient context's flip — inside ImageCanvas's flipped
 /// context that means glyphs render upside down unless counter-flipped
 /// locally, which is what this does (confirmed by direct visual testing).
-func drawCentered(_ text: String, font: NSFont, color: NSColor, y: CGFloat, canvasWidth: Int) {
+public func drawCentered(_ text: String, font: NSFont, color: NSColor, y: CGFloat, canvasWidth: Int) {
     let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
     let nsText = text as NSString
     let size = nsText.size(withAttributes: attrs)
@@ -81,7 +81,7 @@ func drawCentered(_ text: String, font: NSFont, color: NSColor, y: CGFloat, canv
 /// without this local counter-flip, the image renders upside down inside
 /// an otherwise correctly-positioned rect (confirmed by direct visual
 /// testing, same as the text case above).
-func drawImage(_ image: NSImage, in rect: NSRect) {
+public func drawImage(_ image: NSImage, in rect: NSRect) {
     guard let cgContext = NSGraphicsContext.current?.cgContext else {
         image.draw(in: rect)
         return
@@ -100,7 +100,7 @@ func drawImage(_ image: NSImage, in rect: NSRect) {
 /// behavior — needed because e.g. the real `fortune` command frequently
 /// returns quotes with embedded newlines/tabs, which previously broke the
 /// line-height math and caused overlapping text.
-func wrapText(_ text: String, maxCharsPerLine: Int, maxLines: Int? = nil) -> [String] {
+public func wrapText(_ text: String, maxCharsPerLine: Int, maxLines: Int? = nil) -> [String] {
     var lines: [String] = []
     var currentLine = ""
     for word in text.split(whereSeparator: { $0.isWhitespace }) {
@@ -124,7 +124,7 @@ func wrapText(_ text: String, maxCharsPerLine: Int, maxLines: Int? = nil) -> [St
 /// character count — needed when the font size itself varies (see
 /// `fittingFontSize` below), since a fixed character count doesn't
 /// correspond to a fixed pixel width across different sizes.
-func wrapTextToWidth(_ text: String, font: NSFont, maxWidth: CGFloat) -> [String] {
+public func wrapTextToWidth(_ text: String, font: NSFont, maxWidth: CGFloat) -> [String] {
     let attrs: [NSAttributedString.Key: Any] = [.font: font]
     var lines: [String] = []
     var currentLine = ""
@@ -153,8 +153,19 @@ func wrapTextToWidth(_ text: String, font: NSFont, maxWidth: CGFloat) -> [String
 /// the embedded profile. This also bakes in any EXIF orientation
 /// (`kCGImageSourceCreateThumbnailWithTransform`) so the pixels come out
 /// upright regardless of source format.
-func loadUprightCGImage(at url: URL, maxPixelSize: Int = 2400) -> CGImage? {
+public func loadUprightCGImage(at url: URL, maxPixelSize: Int = 2400) -> CGImage? {
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    return uprightThumbnail(from: source, maxPixelSize: maxPixelSize)
+}
+
+/// Same as `loadUprightCGImage(at:maxPixelSize:)` but for image bytes already
+/// in memory (e.g. fetched over HTTP) rather than a file on disk.
+public func loadUprightCGImage(data: Data, maxPixelSize: Int = 2400) -> CGImage? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+    return uprightThumbnail(from: source, maxPixelSize: maxPixelSize)
+}
+
+private func uprightThumbnail(from source: CGImageSource, maxPixelSize: Int) -> CGImage? {
     let options: [CFString: Any] = [
         kCGImageSourceCreateThumbnailWithTransform: true,
         kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -167,7 +178,7 @@ func loadUprightCGImage(at url: URL, maxPixelSize: Int = 2400) -> CGImage? {
 /// ratio, letterboxing with `background` — so the frame displays the whole
 /// photo instead of cropping it to fill the screen when the photo's aspect
 /// ratio doesn't match the frame's.
-func renderLetterboxed(cgImage: CGImage, width: Int, height: Int, background: NSColor) -> NSImage? {
+public func renderLetterboxed(cgImage: CGImage, width: Int, height: Int, background: NSColor) -> NSImage? {
     ImageCanvas.render(width: width, height: height) {
         background.setFill()
         NSBezierPath(rect: NSRect(x: 0, y: 0, width: width, height: height)).fill()
@@ -193,7 +204,40 @@ func renderLetterboxed(cgImage: CGImage, width: Int, height: Int, background: NS
     }
 }
 
-func fittingFontSize(
+/// Fits `cgImage` into a `width`x`height` canvas by scaling to *cover* the
+/// canvas and cropping the overflow, centered — the opposite tradeoff to
+/// `renderLetterboxed`: no padding bars, but part of the photo is cut off.
+/// Meant for a landscape photo on a portrait frame, where fitting the whole
+/// image renders it small in the middle of two large background bars.
+public func renderFilled(cgImage: CGImage, width: Int, height: Int) -> NSImage? {
+    ImageCanvas.render(width: width, height: height) {
+        let imageAspect = CGFloat(cgImage.width) / CGFloat(cgImage.height)
+        let canvasAspect = CGFloat(width) / CGFloat(height)
+        let fitWidth: CGFloat
+        let fitHeight: CGFloat
+        if imageAspect > canvasAspect {
+            // Wider than the canvas: match height, overflow left/right.
+            fitHeight = CGFloat(height)
+            fitWidth = fitHeight * imageAspect
+        } else {
+            // Taller than the canvas: match width, overflow top/bottom.
+            fitWidth = CGFloat(width)
+            fitHeight = fitWidth / imageAspect
+        }
+        let rect = NSRect(
+            x: (CGFloat(width) - fitWidth) / 2,
+            y: (CGFloat(height) - fitHeight) / 2,
+            width: fitWidth,
+            height: fitHeight
+        )
+        // CGContext clips drawing to its own bounds automatically, so the
+        // overflow left/right or top/bottom is simply cut off here — no
+        // explicit clip path needed.
+        drawImage(NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height)), in: rect)
+    }
+}
+
+public func fittingFontSize(
     for text: String,
     fontName: String,
     range: ClosedRange<CGFloat>,

@@ -2,12 +2,12 @@ import AppKit
 
 /// Current weather conditions, rendered entirely from scratch (no downloaded
 /// photo). Ported from weather_art_uploader.py, using Open-Meteo (free, no
-/// API key). Location is configured in Settings — no default is set, so it
+/// API key). Location is configured in AppSettings — no default is set, so it
 /// must be entered before this source will return useful results.
-struct WeatherSource: ContentSource {
-    let id = "weather"
-    let displayName = "Weather"
-    let galleryName = "Weather"
+public struct WeatherSource: ContentSource {
+    public let id = "weather"
+    public let displayName = "Weather"
+    public let galleryName = "Weather"
 
     private let width = 1200
     private let height = 1600
@@ -37,7 +37,7 @@ struct WeatherSource: ContentSource {
         let current: Current
     }
 
-    func generateImage(settings: Settings) async throws -> Data {
+    public func generateImage(settings: AppSettings) async throws -> Data {
         let current = try await fetchWeather(latitude: settings.weatherLatitude, longitude: settings.weatherLongitude)
         guard let image = renderArt(current: current, locationName: settings.weatherLocationName),
               let jpeg = ImageCanvas.jpegData(image)

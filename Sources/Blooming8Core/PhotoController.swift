@@ -2,44 +2,44 @@ import AppKit
 import Combine
 
 @MainActor
-final class PhotoController: ObservableObject {
-    let settings: Settings
+public final class PhotoController: ObservableObject {
+    public let settings: AppSettings
     private let client = BloominClient()
     private let bleWaker = BLEWaker()
 
-    @Published var previewImage: NSImage?
+    @Published public var previewImage: NSImage?
     /// Raw bytes behind `previewImage`, kept alongside it so "Save Photo"
     /// can write the exact original file rather than a re-encoded copy.
-    @Published var currentImageData: Data?
-    @Published var currentImagePath: String?
-    @Published var deviceName: String?
-    @Published var batteryPercent: Int?
-    @Published var currentGalleryOnDevice: String?
-    @Published var galleries: [String] = []
-    @Published var sleepDurationSeconds: Int?
-    @Published var maxIdleSeconds: Int?
-    @Published var wakeSensitivity: Int?
-    @Published var statusText: String = ""
-    @Published var isBusy: Bool = false
+    @Published public var currentImageData: Data?
+    @Published public var currentImagePath: String?
+    @Published public var deviceName: String?
+    @Published public var batteryPercent: Int?
+    @Published public var currentGalleryOnDevice: String?
+    @Published public var galleries: [String] = []
+    @Published public var sleepDurationSeconds: Int?
+    @Published public var maxIdleSeconds: Int?
+    @Published public var wakeSensitivity: Int?
+    @Published public var statusText: String = ""
+    @Published public var isBusy: Bool = false
     /// Tabs unlocked this app session (in-memory only — re-locks on relaunch).
-    @Published var unlockedTabIDs: Set<UUID> = []
+    @Published public var unlockedTabIDs: Set<UUID> = []
     /// Whether locked tabs are currently shown in the tab bar at all — off by
     /// default so they don't appear to a casual viewer of the popover, toggled
     /// with a keyboard shortcut, and reset to hidden whenever the popover
     /// closes so it doesn't stay revealed for the next person who opens it.
-    @Published var showHiddenTabs: Bool = false
+    @Published public var showHiddenTabs: Bool = false
     /// When the next automatic random photo is scheduled to fire, if enabled.
-    @Published var nextAutoRandomFireDate: Date?
+    @Published public var nextAutoRandomFireDate: Date?
     /// Whether the frame answered the last reachability check — nil means no
     /// device IP is set yet, or the first check hasn't completed.
-    @Published var isDeviceAwake: Bool?
+    @Published public var isDeviceAwake: Bool?
 
     private var autoRandomTimer: Timer?
     private var autoRandomCancellable: AnyCancellable?
     private var statusPollTimer: Timer?
     private var statusPollCancellable: AnyCancellable?
 
-    init(settings: Settings) {
+    public init(settings: AppSettings) {
         self.settings = settings
         // Re-evaluate the schedule whenever any relevant setting changes, and
         // once immediately (Combine's sink fires with the current value right
@@ -134,7 +134,7 @@ final class PhotoController: ObservableObject {
     /// not assigned to any tab, plus ones in tabs that are unlocked (or have
     /// no password). Galleries in a still-locked tab are excluded even if
     /// they were checked before the tab got locked.
-    var availableGalleryNames: Set<String> {
+    public var availableGalleryNames: Set<String> {
         let assigned = Set(settings.tabs.flatMap { $0.galleryNames })
         var available = Set(galleries).subtracting(assigned)
         for tab in settings.tabs where !tab.isLocked || unlockedTabIDs.contains(tab.id) {
@@ -144,7 +144,7 @@ final class PhotoController: ObservableObject {
     }
 
     @discardableResult
-    func unlock(tab: GalleryTab, password: String) -> Bool {
+    public func unlock(tab: GalleryTab, password: String) -> Bool {
         guard let hash = tab.passwordHash else {
             unlockedTabIDs.insert(tab.id)
             return true
@@ -154,7 +154,7 @@ final class PhotoController: ObservableObject {
         return true
     }
 
-    func loadGalleries() async {
+    public func loadGalleries() async {
         guard !settings.deviceIP.isEmpty else { return }
         do {
             let names = try await client.fetchGalleryList(ip: settings.deviceIP)
@@ -177,7 +177,7 @@ final class PhotoController: ObservableObject {
     /// wide-gamut/HDR sources like HEIC correctly). Creates the gallery if it
     /// doesn't already exist. Does not display any of them — this is a bulk
     /// import, not a "show now" action.
-    func uploadPhotos(urls: [URL], gallery: String) async {
+    public func uploadPhotos(urls: [URL], gallery: String) async {
         let trimmedGallery = gallery.trimmingCharacters(in: .whitespaces)
         guard !trimmedGallery.isEmpty else {
             statusText = "Choose or type a gallery to upload into."
@@ -196,7 +196,7 @@ final class PhotoController: ObservableObject {
             for (index, url) in urls.enumerated() {
                 statusText = "Uploading \(url.lastPathComponent) (\(index + 1)/\(urls.count))..."
                 guard let cgImage = loadUprightCGImage(at: url),
-                      let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+                      let framed = renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: settings.cropLandscapePhotos),
                       let jpeg = ImageCanvas.jpegData(framed)
                 else {
                     failed += 1
@@ -221,7 +221,7 @@ final class PhotoController: ObservableObject {
 
     /// Downloads every photo in a gallery into a subfolder (named after the
     /// gallery) inside the chosen destination folder.
-    func downloadGallery(_ gallery: String, to folder: URL) async {
+    public func downloadGallery(_ gallery: String, to folder: URL) async {
         guard !gallery.isEmpty else {
             statusText = "Choose a gallery to download."
             return
@@ -262,7 +262,7 @@ final class PhotoController: ObservableObject {
     /// Sends a Bluetooth wake pulse on demand (e.g. from a button or menu item),
     /// independent of any HTTP call failing first.
     @discardableResult
-    func wakeFrame() async -> Bool {
+    public func wakeFrame() async -> Bool {
         guard !settings.bleDeviceName.isEmpty else {
             statusText = "Set a Bluetooth device name in Settings first."
             return false
@@ -329,7 +329,7 @@ final class PhotoController: ObservableObject {
     /// silently reject a /show call while it's still mid-draw from an
     /// earlier one, so this retries a few times with a short pause if it
     /// reports busy.
-    func redisplayCurrentPhoto() async {
+    public func redisplayCurrentPhoto() async {
         guard !settings.deviceIP.isEmpty else { return }
         isBusy = true
         defer { isBusy = false }
@@ -377,7 +377,7 @@ final class PhotoController: ObservableObject {
     /// Advances the frame's current playback queue by one (only meaningful
     /// when it's in gallery-slideshow or playlist mode), then refreshes the
     /// preview to whatever it landed on.
-    func showNextImage() async {
+    public func showNextImage() async {
         guard !settings.deviceIP.isEmpty else { return }
         isBusy = true
         defer { isBusy = false }
@@ -398,7 +398,7 @@ final class PhotoController: ObservableObject {
     }
 
     /// Starts a gallery slideshow that cycles on-device every `durationSeconds`.
-    func startSlideshow(gallery: String, durationSeconds: Int) async {
+    public func startSlideshow(gallery: String, durationSeconds: Int) async {
         guard !gallery.isEmpty else {
             statusText = "Choose a gallery for the slideshow."
             return
@@ -417,7 +417,7 @@ final class PhotoController: ObservableObject {
     }
 
     /// Stops slideshow/playlist playback, returning the frame to single-image mode.
-    func stopSlideshow() async {
+    public func stopSlideshow() async {
         isBusy = true
         defer { isBusy = false }
         do {
@@ -431,7 +431,7 @@ final class PhotoController: ObservableObject {
     /// Pushes device-level settings (name, sleep timers, wake sensitivity) to
     /// the frame. Only non-nil values are sent. Refreshes deviceInfo
     /// afterward so the UI reflects what the frame actually accepted.
-    func updateDeviceSettings(name: String?, sleepDurationSeconds: Int?, maxIdleSeconds: Int?, wakeSensitivity: Int?) async {
+    public func updateDeviceSettings(name: String?, sleepDurationSeconds: Int?, maxIdleSeconds: Int?, wakeSensitivity: Int?) async {
         isBusy = true
         defer { isBusy = false }
         do {
@@ -452,7 +452,7 @@ final class PhotoController: ObservableObject {
         }
     }
 
-    func refreshCurrentPhoto() async {
+    public func refreshCurrentPhoto() async {
         guard !settings.deviceIP.isEmpty else { return }
         isBusy = true
         defer { isBusy = false }
@@ -471,7 +471,46 @@ final class PhotoController: ObservableObject {
         }
     }
 
-    func showRandomPhoto() async {
+    /// Displays an image that already lives on the frame, by its device path
+    /// (e.g. `/gallerys/Family/IMG_0042.jpg`). The app's gallery browser uses
+    /// this to show a specific picked image rather than a random one.
+    public func showImageAtPath(_ path: String) async {
+        guard !settings.deviceIP.trimmingCharacters(in: .whitespaces).isEmpty else {
+            statusText = "Set the frame's IP address first."
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await withWakeRetry { try await client.show(ip: settings.deviceIP, imagePath: path) }
+            let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
+            previewImage = NSImage(data: data)
+            currentImageData = data
+            currentImagePath = path
+            statusText = "✓ Displayed \((path as NSString).lastPathComponent)"
+        } catch {
+            statusText = "✗ Couldn't display that image: \(error.localizedDescription)"
+        }
+    }
+
+    /// Deletes a single image from a gallery on the device. Returns whether
+    /// it succeeded so a caller browsing that gallery can remove it from its
+    /// own list without a full reload.
+    @discardableResult
+    public func deleteDeviceImage(gallery: String, filename: String) async -> Bool {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await withWakeRetry { try await client.deleteImage(ip: settings.deviceIP, filename: filename, gallery: gallery) }
+            statusText = "✓ Deleted \(filename)"
+            return true
+        } catch {
+            statusText = "✗ Couldn't delete \(filename): \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    public func showRandomPhoto() async {
         let galleriesToUse = settings.selectedGalleries.intersection(availableGalleryNames)
         guard !galleriesToUse.isEmpty else {
             statusText = "Select at least one (unlocked) gallery."
@@ -539,7 +578,7 @@ final class PhotoController: ObservableObject {
     /// (chosen at random if more than one is checked), uploads it to that
     /// source's own gallery (matching whatever the original Python scripts
     /// already used, e.g. "NASA" for APOD), and displays it immediately.
-    func showRandomGeneratedContent() async {
+    public func showRandomGeneratedContent() async {
         let sources = ContentSources.all.filter { settings.selectedContentSources.contains($0.id) }
         guard let source = sources.randomElement() else {
             statusText = "Select at least one content source."
@@ -577,7 +616,6 @@ final class PhotoController: ObservableObject {
         }
     }
 
-    nonisolated private static let imageFileExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "gif", "bmp", "tiff", "tif", "webp"]
 
     /// The frame's firmware requires uploaded filenames to end with `_P.jpg`
     /// (portrait) or `_L.jpg` (landscape — the device rotates the stored
@@ -589,31 +627,53 @@ final class PhotoController: ObservableObject {
         "\(base)_P.jpg"
     }
 
+    /// Fits `cgImage` onto a `width`x`height` portrait canvas, choosing
+    /// aspect-fill (crop and center, no bars) over aspect-fit (whole photo
+    /// visible, letterboxed) only when both `cropLandscapePhotos` is true and
+    /// the source is actually landscape. A portrait or square source already
+    /// roughly matches the frame's aspect ratio and doesn't have the "tiny
+    /// photo between two black bars" problem the setting exists to fix, so
+    /// it's always fit rather than cropped regardless of the flag.
+    ///
+    /// `nonisolated` and takes the flag as a plain parameter rather than
+    /// reading `settings.cropLandscapePhotos` itself: one call site runs
+    /// inside `Task.detached` off the main actor, so this can't be
+    /// `@MainActor`-isolated the way an ordinary instance method would be by
+    /// default.
+    nonisolated private func renderForFrame(cgImage: CGImage, width: Int, height: Int, cropLandscapePhotos: Bool) -> NSImage? {
+        let isLandscape = cgImage.width > cgImage.height
+        if cropLandscapePhotos, isLandscape {
+            return renderFilled(cgImage: cgImage, width: width, height: height)
+        }
+        return renderLetterboxed(cgImage: cgImage, width: width, height: height, background: .black)
+    }
 
-    struct LocalFolderCandidate {
-        let fileURL: URL
-        let image: NSImage
-        let jpegData: Data
+
+    public struct LocalFolderCandidate {
+        public let fileURL: URL
+        public let image: NSImage
+        public let jpegData: Data
     }
 
     /// Multiple randomly-picked candidates for the user to choose from.
     /// Set by `prepareLocalFolderCandidate()`, cleared by `cancelLocalFolderCandidate()`.
-    @Published var localFolderCandidates: [LocalFolderCandidate] = []
+    @Published public var localFolderCandidates: [LocalFolderCandidate] = []
 
     /// Picks 3 random images from the local folder, renders them for preview on
     /// a background thread, and presents them for the user to choose from.
-    func prepareLocalFolderCandidate() {
+    public func prepareLocalFolderCandidate() {
         let folderPath = settings.randomFolderPath.trimmingCharacters(in: .whitespaces)
         guard !folderPath.isEmpty else {
             statusText = "Choose a folder to pick random photos from."
             return
         }
         let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
-        let allImages = enumerateImageFiles(in: folderURL)
+        let allImages = ImageFolder.enumerateImages(in: folderURL)
         guard allImages.count >= 1 else {
             statusText = "No photos found in '\(folderURL.lastPathComponent)'."
             return
         }
+        let cropLandscapePhotos = settings.cropLandscapePhotos
 
         Task.detached(priority: .userInitiated) { [weak self] in
             var candidates: [LocalFolderCandidate] = []
@@ -621,7 +681,7 @@ final class PhotoController: ObservableObject {
 
             for chosen in chosenURLs {
                 guard let cgImage = loadUprightCGImage(at: chosen),
-                      let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+                      let framed = self?.renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: cropLandscapePhotos),
                       let jpeg = ImageCanvas.jpegData(framed)
                 else {
                     continue
@@ -642,14 +702,14 @@ final class PhotoController: ObservableObject {
     }
 
     /// Discards all pending candidates without uploading anything.
-    func cancelLocalFolderCandidate() {
+    public func cancelLocalFolderCandidate() {
         localFolderCandidates = []
     }
 
     /// Loads and prepares a specific image from a file path for display/upload.
-    func prepareBrowsedImage(url: URL) {
+    public func prepareBrowsedImage(url: URL) {
         guard let cgImage = loadUprightCGImage(at: url),
-              let framed = renderLetterboxed(cgImage: cgImage, width: 1200, height: 1600, background: .black),
+              let framed = renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: settings.cropLandscapePhotos),
               let jpeg = ImageCanvas.jpegData(framed)
         else {
             statusText = "Couldn't read '\(url.lastPathComponent)'."
@@ -659,11 +719,26 @@ final class PhotoController: ObservableObject {
         statusText = ""
     }
 
+    /// Same as `prepareBrowsedImage`, but for a frame already extracted from
+    /// a local video (`VideoFrameExtractor`) rather than a still image on
+    /// disk — `sourceURL` is kept only for display/reveal-in-Finder, the
+    /// frame itself comes from `cgImage`, not from re-reading that file.
+    public func prepareVideoFrame(cgImage: CGImage, sourceURL: URL) {
+        guard let framed = renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: settings.cropLandscapePhotos),
+              let jpeg = ImageCanvas.jpegData(framed)
+        else {
+            statusText = "Couldn't process that frame."
+            return
+        }
+        localFolderCandidates = [LocalFolderCandidate(fileURL: sourceURL, image: framed, jpegData: jpeg)]
+        statusText = ""
+    }
+
     /// Uploads the approved candidate to the frame's "Random" gallery and
     /// displays it immediately. That gallery is meant to hold exactly one
     /// photo at a time, so whatever's already in it is deleted first rather
     /// than left to accumulate.
-    func confirmLocalFolderCandidate(_ candidate: LocalFolderCandidate) async {
+    public func confirmLocalFolderCandidate(_ candidate: LocalFolderCandidate) async {
         isBusy = true
         defer { isBusy = false }
         do {
@@ -718,7 +793,7 @@ final class PhotoController: ObservableObject {
     }
 
     /// Deletes the entire Random gallery from the device.
-    func deleteRandomGallery() async {
+    public func deleteRandomGallery() async {
         isBusy = true
         defer { isBusy = false }
         do {
@@ -739,18 +814,5 @@ final class PhotoController: ObservableObject {
         }
     }
 
-    nonisolated private func enumerateImageFiles(in folder: URL) -> [URL] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: folder,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        var files: [URL] = []
-        for case let url as URL in enumerator where Self.imageFileExtensions.contains(url.pathExtension.lowercased()) {
-            files.append(url)
-        }
-        return files
-    }
 
 }

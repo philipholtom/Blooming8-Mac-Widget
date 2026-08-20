@@ -1,15 +1,15 @@
 import Foundation
 
-struct DeviceInfo: Decodable {
-    let name: String?
-    let image: String?
-    let gallery: String?
-    let battery: Int?
-    let sleepDuration: Int?
-    let maxIdle: Int?
-    let idxWakeSens: Int?
+public struct DeviceInfo: Decodable {
+    public let name: String?
+    public let image: String?
+    public let gallery: String?
+    public let battery: Int?
+    public let sleepDuration: Int?
+    public let maxIdle: Int?
+    public let idxWakeSens: Int?
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case name, image, gallery, battery
         case sleepDuration = "sleep_duration"
         case maxIdle = "max_idle"
@@ -17,33 +17,33 @@ struct DeviceInfo: Decodable {
     }
 }
 
-struct GalleryEntry: Decodable {
-    let name: String
+public struct GalleryEntry: Decodable {
+    public let name: String
 }
 
-struct GalleryImage: Decodable {
-    let name: String
+public struct GalleryImage: Decodable {
+    public let name: String
 }
 
-struct GalleryListing: Decodable {
-    let data: [GalleryImage]
-    let cursorNext: String?
-    let more: Bool?
+public struct GalleryListing: Decodable {
+    public let data: [GalleryImage]
+    public let cursorNext: String?
+    public let more: Bool?
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case data
         case cursorNext = "cursor_next"
         case more
     }
 }
 
-enum BloominError: LocalizedError {
+public enum BloominError: LocalizedError {
     case noDeviceIP
     case badResponse(String)
     case http(Int)
     case busy(String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .noDeviceIP:
             return "Set the frame's IP address first."
@@ -57,10 +57,10 @@ enum BloominError: LocalizedError {
     }
 }
 
-final class BloominClient {
+public final class BloominClient {
     private let session: URLSession
 
-    init() {
+    public init() {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
         config.timeoutIntervalForResource = 15
@@ -74,14 +74,14 @@ final class BloominClient {
         return "http://\(ip.trimmingCharacters(in: .whitespaces))"
     }
 
-    func fetchDeviceInfo(ip: String) async throws -> DeviceInfo {
+    public func fetchDeviceInfo(ip: String) async throws -> DeviceInfo {
         let url = try URL(string: baseURL(ip: ip) + "/deviceInfo")!
         let (data, response) = try await session.data(from: url)
         try checkStatus(response)
         return try JSONDecoder().decode(DeviceInfo.self, from: data)
     }
 
-    func fetchGalleryList(ip: String) async throws -> [String] {
+    public func fetchGalleryList(ip: String) async throws -> [String] {
         let url = try URL(string: baseURL(ip: ip) + "/gallery/list")!
         let (data, response) = try await session.data(from: url)
         try checkStatus(response)
@@ -93,7 +93,7 @@ final class BloominClient {
     /// pagination (`full=1`). The cursor from one page's `cursor_next` is
     /// fed back in via a `cursor` query parameter (undocumented, found by
     /// probing the device directly) to fetch the next page.
-    func fetchAllImages(ip: String, gallery: String) async throws -> [String] {
+    public func fetchAllImages(ip: String, gallery: String) async throws -> [String] {
         var allNames: [String] = []
         var seen = Set<String>()
         var cursor: String? = nil
@@ -139,7 +139,7 @@ final class BloominClient {
     /// previous one — observed both as HTTP 500 and, inconsistently, as
     /// HTTP 200 with `{"status":"fail","msg":"DRAWING"}` in the body. Check
     /// both shapes so callers can reliably detect and retry on this.
-    func show(ip: String, imagePath: String) async throws {
+    public func show(ip: String, imagePath: String) async throws {
         let url = try URL(string: baseURL(ip: ip) + "/show")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -157,7 +157,7 @@ final class BloominClient {
     /// Immediately displays the next image in the frame's current playback
     /// queue (only meaningful when it's in gallery-slideshow or playlist
     /// mode, not single-image mode).
-    func showNext(ip: String) async throws {
+    public func showNext(ip: String) async throws {
         let url = try URL(string: baseURL(ip: ip) + "/showNext")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -167,7 +167,7 @@ final class BloominClient {
 
     /// Starts a gallery slideshow: cycles through `gallery`'s images every
     /// `durationSeconds`, advancing automatically on-device.
-    func startSlideshow(ip: String, gallery: String, durationSeconds: Int) async throws {
+    public func startSlideshow(ip: String, gallery: String, durationSeconds: Int) async throws {
         let url = try URL(string: baseURL(ip: ip) + "/show")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -179,7 +179,7 @@ final class BloominClient {
     }
 
     /// Stops slideshow/playlist playback, returning to single-image mode.
-    func stopPlayback(ip: String) async throws {
+    public func stopPlayback(ip: String) async throws {
         let url = try URL(string: baseURL(ip: ip) + "/stop")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -189,7 +189,7 @@ final class BloominClient {
 
     /// Updates device-level settings. Only non-nil fields are sent, so a
     /// call can touch just the name, just the sleep timers, or all of them.
-    func updateSettings(ip: String, name: String? = nil, sleepDuration: Int? = nil, maxIdle: Int? = nil, idxWakeSens: Int? = nil) async throws {
+    public func updateSettings(ip: String, name: String? = nil, sleepDuration: Int? = nil, maxIdle: Int? = nil, idxWakeSens: Int? = nil) async throws {
         let url = try URL(string: baseURL(ip: ip) + "/settings")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -204,7 +204,7 @@ final class BloominClient {
         try checkStatus(response)
     }
 
-    func fetchImageData(ip: String, path: String) async throws -> Data {
+    public func fetchImageData(ip: String, path: String) async throws -> Data {
         let url = try URL(string: baseURL(ip: ip) + path)!
         let (data, response) = try await session.data(from: url)
         try checkStatus(response)
@@ -214,7 +214,7 @@ final class BloominClient {
     /// Best-effort: creates a gallery if it doesn't already exist. Ignores
     /// failure (e.g. it already exists) since this is purely a convenience
     /// to keep generated content out of the user's own galleries.
-    func ensureGallery(ip: String, name: String) async {
+    public func ensureGallery(ip: String, name: String) async {
         guard var components = try? URLComponents(string: baseURL(ip: ip) + "/gallery") else { return }
         components.queryItems = [URLQueryItem(name: "name", value: name)]
         guard let url = components.url else { return }
@@ -229,7 +229,7 @@ final class BloominClient {
 
     /// Uploads a JPEG to a gallery and, if `showNow`, displays it immediately.
     /// Returns the stored path on the device (e.g. `/gallerys/{gallery}/{filename}`).
-    func uploadImage(ip: String, filename: String, gallery: String, imageData: Data, showNow: Bool) async throws -> String {
+    public func uploadImage(ip: String, filename: String, gallery: String, imageData: Data, showNow: Bool) async throws -> String {
         var components = URLComponents(string: try baseURL(ip: ip) + "/upload")!
         components.queryItems = [
             URLQueryItem(name: "filename", value: filename),
@@ -256,7 +256,7 @@ final class BloominClient {
     }
 
     /// Deletes a single image from a gallery on the device.
-    func deleteImage(ip: String, filename: String, gallery: String) async throws {
+    public func deleteImage(ip: String, filename: String, gallery: String) async throws {
         var components = URLComponents(string: try baseURL(ip: ip) + "/image/delete")!
         components.queryItems = [
             URLQueryItem(name: "image", value: filename),
@@ -269,7 +269,7 @@ final class BloominClient {
     }
 
     /// Deletes an entire gallery and all its images from the device.
-    func deleteGallery(ip: String, name: String) async throws {
+    public func deleteGallery(ip: String, name: String) async throws {
         var components = URLComponents(string: try baseURL(ip: ip) + "/gallery")!
         components.queryItems = [
             URLQueryItem(name: "name", value: name)

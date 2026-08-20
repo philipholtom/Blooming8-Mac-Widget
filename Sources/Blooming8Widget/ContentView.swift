@@ -1,3 +1,4 @@
+import Blooming8Core
 import SwiftUI
 import AppKit
 
@@ -12,7 +13,7 @@ private let favoriteThumbnailCache: NSCache<NSString, NSImage> = {
 }()
 
 struct ContentView: View {
-    @ObservedObject var settings: Settings
+    @ObservedObject var settings: AppSettings
     @ObservedObject var controller: PhotoController
 
     @State private var showSettings: Bool = false
@@ -318,7 +319,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Automatic random photo (Settings)
+    // MARK: - Automatic random photo (AppSettings)
 
     private var autoRandomSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -436,10 +437,17 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Upload / download photos (Settings)
+    // MARK: - Upload / download photos (AppSettings)
 
     private var photoManagementSection: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Toggle("Crop landscape photos to fill the frame", isOn: $settings.cropLandscapePhotos)
+            Text("Off: a landscape photo shows in full, with black bars above and below. On: it's cropped and centered to fill the whole screen instead. Portrait photos aren't affected.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
             if !controller.galleries.isEmpty {
                 Picker("Gallery", selection: $manageGallery) {
                     ForEach(controller.galleries, id: \.self) { name in
@@ -473,7 +481,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Tab management (Settings)
+    // MARK: - Tab management (AppSettings)
 
     private var tabManagerView: some View {
         VStack(alignment: .leading, spacing: 10) {

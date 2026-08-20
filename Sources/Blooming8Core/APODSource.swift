@@ -3,10 +3,10 @@ import AppKit
 /// NASA's Astronomy Picture of the Day, for a random date, framed with the
 /// date and description overlaid. Ported from random_apod_framed.py — the
 /// layout constants below match that script exactly.
-struct APODSource: ContentSource {
-    let id = "apod"
-    let displayName = "NASA Photo of the Day"
-    let galleryName = "NASA"
+public struct APODSource: ContentSource {
+    public let id = "apod"
+    public let displayName = "NASA Photo of the Day"
+    public let galleryName = "NASA"
 
     private let width = 1200
     private let height = 1600
@@ -14,7 +14,7 @@ struct APODSource: ContentSource {
     private let textAreaTop: CGFloat = 80
     private let textAreaBottom: CGFloat = 150
 
-    func generateImage(settings: Settings) async throws -> Data {
+    public func generateImage(settings: AppSettings) async throws -> Data {
         let apod = try await fetchRandomAPOD(apiKey: settings.nasaApiKey)
         guard let urlString = apod.hdurl ?? apod.url, let imageURL = URL(string: urlString) else {
             throw ContentSourceError.message("No image URL in APOD response")
