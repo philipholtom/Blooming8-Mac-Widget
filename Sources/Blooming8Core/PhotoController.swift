@@ -832,7 +832,21 @@ public final class PhotoController: ObservableObject {
         defer { isBusy = false }
         statusText = "→ PUT /gallery?name=\(trimmed)"
         await client.ensureGallery(ip: settings.deviceIP, name: trimmed)
-        await loadGalleries()
+
+        // The PUT itself completing doesn't mean /gallery/list reflects it
+        // yet — this device's HTTP server has shown eventual-consistency lag
+        // elsewhere in testing (thumbnails, listings), so a re-fetch straight
+        // after can genuinely miss a gallery that was just created
+        // successfully. Retry the listing a few times before concluding
+        // failure, same shape as the reachability poll used for BLE wake.
+        for attempt in 1...4 {
+            await loadGalleries()
+            if galleries.contains(trimmed) { break }
+            if attempt < 4 {
+                try? await Task.sleep(nanoseconds: 750_000_000)
+            }
+        }
+
         statusText = galleries.contains(trimmed)
             ? "✓ Created '\(trimmed)'"
             : "✗ Couldn't create '\(trimmed)'"

@@ -11,6 +11,7 @@ struct Sidebar: View {
 
     @State private var showNewGallerySheet = false
     @State private var newGalleryName = ""
+    @State private var galleryPendingDeletion: String?
 
     var body: some View {
         // The footer is a plain sibling below the ScrollView, not a
@@ -38,6 +39,11 @@ struct Sidebar: View {
                     galleriesHeader
                     ForEach(visibleGalleries, id: \.self) { name in
                         row(.gallery(name), isLocked: lockedTab(for: name) != nil)
+                            .contextMenu {
+                                Button("Delete Gallery…", role: .destructive) {
+                                    galleryPendingDeletion = name
+                                }
+                            }
                     }
                 }
                 .padding(.horizontal, 10)
@@ -58,6 +64,20 @@ struct Sidebar: View {
                 .opacity(0)
                 .accessibilityHidden(true)
         )
+        .alert(
+            "Delete '\(galleryPendingDeletion ?? "")'?",
+            isPresented: Binding(get: { galleryPendingDeletion != nil }, set: { if !$0 { galleryPendingDeletion = nil } })
+        ) {
+            Button("Cancel", role: .cancel) { galleryPendingDeletion = nil }
+            Button("Delete", role: .destructive) {
+                guard let name = galleryPendingDeletion else { return }
+                galleryPendingDeletion = nil
+                if source == .gallery(name) { source = nil }
+                Task { await controller.deleteGalleryOnDevice(name) }
+            }
+        } message: {
+            Text("This removes the gallery and every photo in it from the frame. This can't be undone.")
+        }
     }
 
     /// Unlike the other sections, shown even with zero galleries — the "+"
