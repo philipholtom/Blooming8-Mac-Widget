@@ -32,8 +32,10 @@ struct Sidebar: View {
                     row(.currentPhoto)
 
                     sectionHeader("Library")
-                    row(.localFolder, isLocked: isLocalFolderLocked)
-                    row(.favorites, badge: settings.favoriteImagePaths.count, isLocked: isLocalFolderLocked)
+                    if shouldShowLocalFolderRows {
+                        row(.localFolder, isLocked: isLocalFolderLocked)
+                        row(.favorites, badge: settings.favoriteImagePaths.count, isLocked: isLocalFolderLocked)
+                    }
                     row(.applePhotos)
                     row(.generated)
 
@@ -54,11 +56,11 @@ struct Sidebar: View {
 
             statusFooter
         }
-        // Invisible — mirrors the widget's ⌘⇧L: reveals galleries behind a
-        // still-locked tab (with a lock icon) without a visible control
-        // anyone could stumble onto. Selecting one still requires the
-        // password (RootView routes to LockedGalleryPrompt); this only
-        // controls whether the row appears at all.
+        // Invisible — mirrors the widget's ⌘⇧L: reveals galleries (and, when
+        // password-protected, Local Folder/Favorites) behind a still-locked
+        // row, without a visible control anyone could stumble onto.
+        // Selecting one still requires the password; this only controls
+        // whether the row appears at all.
         .background(
             Button("") { controller.showHiddenTabs.toggle() }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
@@ -157,6 +159,16 @@ struct Sidebar: View {
 
     private var isLocalFolderLocked: Bool {
         settings.localFolderLocked && !controller.isLocalFolderUnlocked
+    }
+
+    /// Hidden from the sidebar entirely — not just locked — while
+    /// password-protected and not yet unlocked this session, same as a
+    /// locked gallery tab: ⌘⇧L reveals the row (still password-gated to
+    /// actually open), and it stays visible once unlocked without needing
+    /// ⌘⇧L again. An unprotected Local Folder/Favorites is unaffected and
+    /// always shows.
+    private var shouldShowLocalFolderRows: Bool {
+        !settings.localFolderLocked || controller.isLocalFolderUnlocked || controller.showHiddenTabs
     }
 
     /// A plain tappable row rather than `List(selection:)`. That binding
