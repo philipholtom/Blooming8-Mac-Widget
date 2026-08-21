@@ -237,9 +237,23 @@ final class LibraryModel: ObservableObject {
         }
     }
 
+    /// Stale-while-revalidate, same idea as `galleryListingCache` below: a
+    /// library with tens of thousands of photos takes a moment to enumerate
+    /// and, more noticeably, to hand to SwiftUI as a fresh 30k+-item
+    /// `ForEach` — not something worth re-paying on every single visit
+    /// within a session just to pick up photos imported a moment ago.
+    private var applePhotosCache: [LibraryItem]?
+
     private func loadApplePhotos() {
-        isLoading = true
-        items = []
+        if let cached = applePhotosCache {
+            items = cached
+            isLoading = false
+            loadError = cached.isEmpty ? "No photos found in your Photos library." : nil
+        } else {
+            isLoading = true
+            items = []
+        }
+
         loadTask = Task {
             guard await PhotosLibrarySource.requestAccess() else {
                 isLoading = false
@@ -251,10 +265,12 @@ final class LibraryModel: ObservableObject {
                 PhotosLibrarySource.fetchAllImageAssets()
             }.value
             guard !Task.isCancelled else { return }
-            items = assets.map { asset in
+            let fresh = assets.map { asset in
                 LibraryItem(photoAssetID: asset.localIdentifier, name: PhotosLibrarySource.displayName(for: asset))
             }
-            Self.log.notice("load: Apple Photos produced \(self.items.count) images")
+            applePhotosCache = fresh
+            items = fresh
+            Self.log.notice("load: Apple Photos produced \(fresh.count) images")
             isLoading = false
             if items.isEmpty { loadError = "No photos found in your Photos library." }
         }

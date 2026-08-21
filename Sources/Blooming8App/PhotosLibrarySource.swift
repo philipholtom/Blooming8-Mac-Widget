@@ -29,7 +29,10 @@ enum PhotosLibrarySource {
     /// Every image asset in the library, newest first. `PHAsset.fetchAssets`
     /// is safe to call off the main thread — the caller runs this inside a
     /// detached task since even the fetch itself can take a moment against a
-    /// large library.
+    /// large library. Also seeds `assetCache` so the grid's per-cell
+    /// thumbnail/full-res requests (potentially tens of thousands of them)
+    /// don't each have to re-run a `PHAsset.fetchAssets(withLocalIdentifiers:)`
+    /// database lookup just to get back an object this call already had.
     static func fetchAllImageAssets() -> [PHAsset] {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
@@ -38,6 +41,7 @@ enum PhotosLibrarySource {
         var assets: [PHAsset] = []
         assets.reserveCapacity(result.count)
         result.enumerateObjects { asset, _, _ in assets.append(asset) }
+        assetCache.store(assets)
         return assets
     }
 
@@ -58,15 +62,25 @@ enum PhotosLibrarySource {
         return formatter
     }()
 
+    private static let assetCache = AssetCache()
+
+    /// Looks the asset up in `assetCache` first (populated by
+    /// `fetchAllImageAssets()`, which the grid always runs before it can ask
+    /// for a single thumbnail) and only falls back to a fresh database fetch
+    /// if it's somehow missing — e.g. the browser wasn't the caller (a
+    /// future feature reaching in with a bare ID).
+    private static func resolveAsset(_ assetID: String) -> PHAsset? {
+        if let cached = assetCache.asset(for: assetID) { return cached }
+        return PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject
+    }
+
     /// A grid-sized preview for `assetID`, downloading from iCloud if the
     /// original isn't stored on this Mac. `.highQualityFormat` delivers
     /// exactly once (unlike `.opportunistic`, which can call back twice —
     /// a fast low-res pass then a better one — and would need extra
     /// bookkeeping to safely resume a continuation only once).
     static func thumbnail(assetID: String, maxPixelSize: Int) async -> NSImage? {
-        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject else {
-            return nil
-        }
+        guard let asset = resolveAsset(assetID) else { return nil }
         let targetSize = CGSize(width: maxPixelSize, height: maxPixelSize)
         return await withCheckedContinuation { continuation in
             let options = PHImageRequestOptions()
@@ -87,9 +101,7 @@ enum PhotosLibrarySource {
     /// Downloads from iCloud if needed, so this can take longer than the
     /// thumbnail fetch above for a photo that isn't cached locally.
     static func fetchOriginalData(assetID: String) async -> Data? {
-        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject else {
-            return nil
-        }
+        guard let asset = resolveAsset(assetID) else { return nil }
         return await withCheckedContinuation { continuation in
             let options = PHImageRequestOptions()
             options.deliveryMode = .highQualityFormat
@@ -102,10 +114,38 @@ enum PhotosLibrarySource {
     }
 }
 
+/// Plain lock-protected dictionary, not an actor: `fetchAllImageAssets()` is
+/// a synchronous call (already running off the main thread inside a detached
+/// task), and populating this from there shouldn't force it — or every
+/// caller — through an `await`.
+private final class AssetCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var byID: [String: PHAsset] = [:]
+
+    func store(_ assets: [PHAsset]) {
+        lock.lock()
+        defer { lock.unlock() }
+        for asset in assets { byID[asset.localIdentifier] = asset }
+    }
+
+    func asset(for id: String) -> PHAsset? {
+        lock.lock()
+        defer { lock.unlock() }
+        return byID[id]
+    }
+}
+
 /// Bounded thumbnail cache for the Photos grid, mirroring `ThumbnailStore`/
 /// `DeviceThumbnailStore` in Blooming8Core — same shape, kept as a separate
 /// app-local type since it wraps `Photos` rather than a file path or an HTTP
 /// fetch.
+///
+/// Concurrency is capped the same way `DeviceThumbnailStore` caps requests to
+/// the frame's slow embedded HTTP server: without it, a library in the tens
+/// of thousands scrolling past dozens of newly-visible grid cells at once
+/// fires that many simultaneous `PHImageManager` requests, which was enough
+/// to make photolibraryd fall behind and every cell sit on its spinner far
+/// longer than a single thumbnail decode should ever take.
 actor PhotosThumbnailStore {
     static let shared = PhotosThumbnailStore()
 
@@ -117,18 +157,41 @@ actor PhotosThumbnailStore {
 
     private var inFlight: [String: Task<NSImage?, Never>] = [:]
 
+    private let maxConcurrent = 6
+    private var activeCount = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
     func thumbnail(assetID: String, maxPixelSize: Int = 320) async -> NSImage? {
         let key = "\(assetID)#\(maxPixelSize)"
         if let cached = cache.object(forKey: key as NSString) { return cached }
         if let existing = inFlight[key] { return await existing.value }
 
         let task = Task<NSImage?, Never> {
-            await PhotosLibrarySource.thumbnail(assetID: assetID, maxPixelSize: maxPixelSize)
+            await self.acquireSlot()
+            let image = await PhotosLibrarySource.thumbnail(assetID: assetID, maxPixelSize: maxPixelSize)
+            await self.releaseSlot()
+            return image
         }
         inFlight[key] = task
         let image = await task.value
         inFlight[key] = nil
         if let image { cache.setObject(image, forKey: key as NSString) }
         return image
+    }
+
+    private func acquireSlot() async {
+        if activeCount < maxConcurrent {
+            activeCount += 1
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+        activeCount += 1
+    }
+
+    private func releaseSlot() {
+        activeCount -= 1
+        if !waiters.isEmpty {
+            waiters.removeFirst().resume()
+        }
     }
 }
