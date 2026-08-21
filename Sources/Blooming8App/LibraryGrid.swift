@@ -291,6 +291,13 @@ struct LibraryGrid: View {
                 }
             } else if let devicePath = item.devicePath {
                 await controller.showImageAtPath(devicePath)
+            } else if let assetID = item.photoAssetID {
+                guard let data = await PhotosLibrarySource.fetchOriginalData(assetID: assetID) else { return }
+                controller.preparePhotosLibraryImage(data: data, displayName: item.name)
+                if let candidate = controller.localFolderCandidates.first {
+                    await controller.confirmLocalFolderCandidate(candidate)
+                    controller.cancelLocalFolderCandidate()
+                }
             }
         }
     }
@@ -464,6 +471,8 @@ private struct LibraryCell: View {
                     path: devicePath,
                     maxPixelSize: 400
                 )
+            } else if let assetID = item.photoAssetID {
+                image = await PhotosThumbnailStore.shared.thumbnail(assetID: assetID, maxPixelSize: 400)
             }
             didAttemptLoad = true
         }

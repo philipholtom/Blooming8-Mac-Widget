@@ -34,6 +34,7 @@ struct Sidebar: View {
                     sectionHeader("Library")
                     row(.localFolder, isLocked: isLocalFolderLocked)
                     row(.favorites, badge: settings.favoriteImagePaths.count, isLocked: isLocalFolderLocked)
+                    row(.applePhotos, isLocked: isLocalFolderLocked)
                     row(.generated)
 
                     galleriesHeader

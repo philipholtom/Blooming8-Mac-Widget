@@ -9,6 +9,7 @@ enum LibrarySource: Hashable {
     case currentPhoto
     case localFolder
     case favorites
+    case applePhotos
     case generated
     case gallery(String)
 
@@ -17,6 +18,7 @@ enum LibrarySource: Hashable {
         case .currentPhoto: return "On the Frame"
         case .localFolder: return "Local Folder"
         case .favorites: return "Favorites"
+        case .applePhotos: return "Apple Photos"
         case .generated: return "Generated"
         case .gallery(let name): return name
         }
@@ -27,6 +29,7 @@ enum LibrarySource: Hashable {
         case .currentPhoto: return "photo.on.rectangle.angled"
         case .localFolder: return "folder"
         case .favorites: return "star"
+        case .applePhotos: return "photo.on.rectangle"
         case .generated: return "sparkles"
         case .gallery: return "rectangle.stack"
         }
@@ -49,6 +52,11 @@ struct LibraryItem: Identifiable, Hashable {
     /// separately rather than re-parsed out of the path string, since
     /// deleting an image needs the gallery name and bare filename apart.
     let galleryName: String?
+    /// Set only for Photos-library items. Re-fetching the `PHAsset` by this
+    /// ID when a thumbnail or full-resolution export is needed is cheap
+    /// (a local database lookup), so items only carry the ID rather than
+    /// the asset object itself.
+    let photoAssetID: String?
     let name: String
     let kind: Kind
 
@@ -57,6 +65,7 @@ struct LibraryItem: Identifiable, Hashable {
         self.url = localURL
         self.devicePath = nil
         self.galleryName = nil
+        self.photoAssetID = nil
         self.name = localURL.lastPathComponent
         self.kind = kind
     }
@@ -66,7 +75,18 @@ struct LibraryItem: Identifiable, Hashable {
         self.url = nil
         self.devicePath = devicePath
         self.galleryName = galleryName
+        self.photoAssetID = nil
         self.name = (devicePath as NSString).lastPathComponent
+        self.kind = .image
+    }
+
+    init(photoAssetID: String, name: String) {
+        self.id = photoAssetID
+        self.url = nil
+        self.devicePath = nil
+        self.galleryName = nil
+        self.photoAssetID = photoAssetID
+        self.name = name
         self.kind = .image
     }
 
@@ -155,6 +175,9 @@ final class LibraryModel: ObservableObject {
             items = settings.favoriteImagePaths.map { LibraryItem(localURL: URL(fileURLWithPath: $0)) }
             isLoading = false
 
+        case .applePhotos:
+            loadApplePhotos()
+
         case .gallery(let name):
             loadGallery(named: name)
         }
@@ -211,6 +234,29 @@ final class LibraryModel: ObservableObject {
             Self.log.notice("load: local folder produced \(imageURLs.count) images, \(videoURLs.count) videos")
             isLoading = false
             if items.isEmpty { loadError = "No images or videos found under \(folder.path)." }
+        }
+    }
+
+    private func loadApplePhotos() {
+        isLoading = true
+        items = []
+        loadTask = Task {
+            guard await PhotosLibrarySource.requestAccess() else {
+                isLoading = false
+                loadError = "Photos access denied. Enable it for Blooming8 in System Settings → Privacy & Security → Photos."
+                return
+            }
+            guard !Task.isCancelled else { return }
+            let assets = await Task.detached(priority: .userInitiated) {
+                PhotosLibrarySource.fetchAllImageAssets()
+            }.value
+            guard !Task.isCancelled else { return }
+            items = assets.map { asset in
+                LibraryItem(photoAssetID: asset.localIdentifier, name: PhotosLibrarySource.displayName(for: asset))
+            }
+            Self.log.notice("load: Apple Photos produced \(self.items.count) images")
+            isLoading = false
+            if items.isEmpty { loadError = "No photos found in your Photos library." }
         }
     }
 

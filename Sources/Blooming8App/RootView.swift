@@ -62,11 +62,11 @@ struct RootView: View {
         .onChange(of: source) { newValue in
             let resolved = newValue ?? .currentPhoto
             Self.log.notice("sidebar: selected \(resolved.title, privacy: .public)")
-            // Re-lock on the way out, matching the widget: leaving both
-            // Local Folder and Favorites means the next visit re-prompts,
-            // rather than staying unlocked for the rest of the session just
-            // because it was entered once.
-            if resolved != .localFolder, resolved != .favorites {
+            // Re-lock on the way out, matching the widget: leaving Local
+            // Folder, Favorites, or Apple Photos means the next visit
+            // re-prompts, rather than staying unlocked for the rest of the
+            // session just because one of them was entered once.
+            if !isLocalFolderSource(resolved) {
                 controller.isLocalFolderUnlocked = false
             }
             library.load(resolved)
@@ -104,9 +104,14 @@ struct RootView: View {
         }
     }
 
-    private var isLocalFolderSource: Bool {
-        activeSource == .localFolder || activeSource == .favorites
+    /// Personal-photo sources gated behind the same Local Folder & Favorites
+    /// password/Touch ID lock — Apple Photos is personal content too, so it
+    /// shares the lock rather than needing its own.
+    private func isLocalFolderSource(_ source: LibrarySource) -> Bool {
+        source == .localFolder || source == .favorites || source == .applePhotos
     }
+
+    private var isLocalFolderSource: Bool { isLocalFolderSource(activeSource) }
 
     @ViewBuilder
     private var detailForUnlockedSource: some View {

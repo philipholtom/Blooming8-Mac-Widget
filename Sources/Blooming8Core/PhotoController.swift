@@ -743,6 +743,26 @@ public final class PhotoController: ObservableObject {
         statusText = ""
     }
 
+    /// Same as `prepareBrowsedImage`, but for an image exported from the
+    /// Photos library rather than read from a file on disk — `displayName`
+    /// (e.g. "Aug 21, 2026, 3:45 PM", since Photos assets don't reliably
+    /// expose a real filename) is only used to build the uploaded filename,
+    /// sanitized first since `confirmLocalFolderCandidate` uses it verbatim
+    /// and the frame's upload endpoint shouldn't have to deal with commas,
+    /// colons, or spaces in a filename.
+    public func preparePhotosLibraryImage(data: Data, displayName: String) {
+        guard let cgImage = loadUprightCGImage(data: data),
+              let framed = renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: settings.cropLandscapePhotos),
+              let jpeg = ImageCanvas.jpegData(framed)
+        else {
+            statusText = "Couldn't process that photo."
+            return
+        }
+        let safeName = displayName.replacingOccurrences(of: "[^A-Za-z0-9_-]+", with: "-", options: .regularExpression)
+        localFolderCandidates = [LocalFolderCandidate(fileURL: URL(fileURLWithPath: safeName), image: framed, jpegData: jpeg)]
+        statusText = ""
+    }
+
     /// Uploads the approved candidate to the frame's "Random" gallery and
     /// displays it immediately. That gallery is meant to hold exactly one
     /// photo at a time, so whatever's already in it is deleted first rather

@@ -23,7 +23,7 @@ struct LockedLocalFolderPrompt: View {
             Image(systemName: "lock.fill")
                 .font(.system(size: 34))
                 .foregroundStyle(.secondary)
-            Text("Local photos are locked")
+            Text("Your photos are locked")
                 .font(.headline)
 
             if offerTouchID {

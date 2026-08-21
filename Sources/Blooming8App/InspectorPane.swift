@@ -124,6 +124,13 @@ struct InspectorPane: View {
                 }
             } else if let devicePath = item.devicePath {
                 await controller.showImageAtPath(devicePath)
+            } else if let assetID = item.photoAssetID {
+                guard let data = await PhotosLibrarySource.fetchOriginalData(assetID: assetID) else { return }
+                controller.preparePhotosLibraryImage(data: data, displayName: item.name)
+                if let candidate = controller.localFolderCandidates.first {
+                    await controller.confirmLocalFolderCandidate(candidate)
+                    controller.cancelLocalFolderCandidate()
+                }
             }
         }
     }
@@ -141,6 +148,9 @@ struct InspectorPane: View {
                 preview = NSImage(data: data)
                 info.append(("Size", ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)))
             }
+        } else if let assetID = item.photoAssetID {
+            preview = await PhotosThumbnailStore.shared.thumbnail(assetID: assetID, maxPixelSize: 900)
+            info = [("Taken", item.name)]
         }
     }
 }
