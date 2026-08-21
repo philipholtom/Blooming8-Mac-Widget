@@ -80,9 +80,14 @@ struct SettingsSheet: View {
                         .foregroundStyle(.secondary)
 
                     TextField("Weather location name", text: $weatherLocationNameDraft)
-                    HStack {
-                        TextField("Latitude", text: $weatherLatitudeDraft)
-                        TextField("Longitude", text: $weatherLongitudeDraft)
+                        .textFieldStyle(.roundedBorder)
+                    LabeledContent("Coordinates") {
+                        HStack {
+                            TextField("Latitude", text: $weatherLatitudeDraft)
+                                .textFieldStyle(.roundedBorder)
+                            TextField("Longitude", text: $weatherLongitudeDraft)
+                                .textFieldStyle(.roundedBorder)
+                        }
                     }
 
                     TextField("History highlight year", text: $historyHighlightYearDraft, prompt: Text("1979"))
@@ -148,25 +153,40 @@ struct SettingsSheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            TextField("Device name", text: $deviceNameDraft)
-
-            HStack {
-                Text("Auto-sleep after")
-                TextField("min", text: $maxIdleMinutesDraft)
-                    .frame(width: 50)
-                Text("min").foregroundStyle(.secondary)
+            // LabeledContent, not a bare HStack of Text+TextField+Text: a raw
+            // multi-element HStack as a direct Form/Section row confused
+            // macOS's automatic row-labeling — fields still worked, but
+            // rendered without their usual editable-field appearance,
+            // making them look like static text. LabeledContent is the
+            // Form-native way to pair a label with a control and renders
+            // predictably. .roundedBorder on each field is a second,
+            // unambiguous "you can type here" cue on top of that.
+            LabeledContent("Device name") {
+                TextField("", text: $deviceNameDraft)
+                    .textFieldStyle(.roundedBorder)
             }
 
-            HStack {
-                Text("Deep sleep every")
-                TextField("hrs", text: $sleepDurationHoursDraft)
-                    .frame(width: 50)
-                Text("hours").foregroundStyle(.secondary)
+            LabeledContent("Auto-sleep after") {
+                HStack {
+                    TextField("min", text: $maxIdleMinutesDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 50)
+                    Text("min").foregroundStyle(.secondary)
+                }
             }
 
-            HStack {
-                Text("Wake sensitivity")
+            LabeledContent("Deep sleep every") {
+                HStack {
+                    TextField("hrs", text: $sleepDurationHoursDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 50)
+                    Text("hours").foregroundStyle(.secondary)
+                }
+            }
+
+            LabeledContent("Wake sensitivity") {
                 TextField("", text: $wakeSensitivityDraft)
+                    .textFieldStyle(.roundedBorder)
                     .frame(width: 50)
             }
 
