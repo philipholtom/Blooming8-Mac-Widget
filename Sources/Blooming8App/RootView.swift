@@ -96,7 +96,7 @@ struct RootView: View {
     @ViewBuilder
     private var detail: some View {
         if case .gallery(let name) = activeSource, let lockedTab = lockedGalleryTab(name) {
-            LockedGalleryPrompt(tab: lockedTab, controller: controller)
+            LockedGalleryPrompt(tab: lockedTab, controller: controller, settings: settings)
         } else if isLocalFolderSource, settings.localFolderLocked, !controller.isLocalFolderUnlocked {
             LockedLocalFolderPrompt(settings: settings, controller: controller)
         } else {

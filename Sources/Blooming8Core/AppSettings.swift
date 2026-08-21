@@ -125,6 +125,14 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(localFolderPasswordHash, forKey: "localFolderPasswordHash") }
     }
 
+    /// When true, unlock prompts (gallery tabs, Local Folder/Favorites) try
+    /// Touch ID first and only fall back to the password field if it's
+    /// unavailable or fails. The password stays the real secret either way —
+    /// this only changes whether biometrics offer a faster path to it.
+    @Published public var useTouchIDForLocks: Bool {
+        didSet { defaults.set(useTouchIDForLocks, forKey: "useTouchIDForLocks") }
+    }
+
     public convenience init() {
         self.init(defaults: UserDefaults(suiteName: AppSettings.suiteName) ?? .standard)
     }
@@ -190,6 +198,7 @@ public final class AppSettings: ObservableObject {
         favoriteImagePaths = defaults.stringArray(forKey: "favoriteImagePaths") ?? []
         localFolderLocked = defaults.bool(forKey: "localFolderLocked")
         localFolderPasswordHash = defaults.string(forKey: "localFolderPasswordHash")
+        useTouchIDForLocks = defaults.bool(forKey: "useTouchIDForLocks")
     }
 
     /// The widget stored everything in the standard domain before the app
@@ -208,7 +217,7 @@ public final class AppSettings: ObservableObject {
             "autoRandomDailyMinute", "nasaApiKey", "selectedContentSources",
             "weatherLocationName", "weatherLatitude", "weatherLongitude",
             "historyHighlightYear", "randomFolderPath", "favoriteImagePaths",
-            "localFolderLocked", "localFolderPasswordHash"
+            "localFolderLocked", "localFolderPasswordHash", "useTouchIDForLocks"
         ]
         for key in keys {
             guard let value = legacy.object(forKey: key) else { continue }

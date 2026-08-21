@@ -9,9 +9,15 @@ import SwiftUI
 struct LockedGalleryPrompt: View {
     let tab: GalleryTab
     @ObservedObject var controller: PhotoController
+    @ObservedObject var settings: AppSettings
 
     @State private var passwordDraft = ""
     @State private var showError = false
+    @State private var isCheckingBiometrics = false
+
+    private var offerTouchID: Bool {
+        settings.useTouchIDForLocks && BiometricAuth.isAvailable()
+    }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -20,6 +26,20 @@ struct LockedGalleryPrompt: View {
                 .foregroundStyle(.secondary)
             Text("'\(tab.name)' is locked")
                 .font(.headline)
+
+            if offerTouchID {
+                Button {
+                    Task { await attemptTouchIDUnlock() }
+                } label: {
+                    Label("Unlock with Touch ID", systemImage: "touchid")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isCheckingBiometrics)
+
+                Text("or enter the password")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             SecureField("Password", text: $passwordDraft)
                 .textFieldStyle(.roundedBorder)
@@ -41,6 +61,11 @@ struct LockedGalleryPrompt: View {
             passwordDraft = ""
             showError = false
         }
+        .task(id: tab.id) {
+            if offerTouchID {
+                await attemptTouchIDUnlock()
+            }
+        }
     }
 
     private func attemptUnlock() {
@@ -49,6 +74,15 @@ struct LockedGalleryPrompt: View {
             passwordDraft = ""
         } else {
             showError = true
+        }
+    }
+
+    private func attemptTouchIDUnlock() async {
+        isCheckingBiometrics = true
+        let success = await BiometricAuth.authenticate(reason: "unlock '\(tab.name)'")
+        isCheckingBiometrics = false
+        if success {
+            controller.unlockedTabIDs.insert(tab.id)
         }
     }
 }

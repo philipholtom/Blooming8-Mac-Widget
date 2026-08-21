@@ -73,6 +73,16 @@ struct SettingsSheet: View {
                     localFolderPasswordSection
                 }
 
+                Section("Security") {
+                    Toggle("Use Touch ID to unlock", isOn: $settings.useTouchIDForLocks)
+                        .disabled(!BiometricAuth.isAvailable())
+                    Text(BiometricAuth.isAvailable()
+                        ? "Applies to locked gallery tabs and Local Folder/Favorites. Touch ID is tried first; the password still works as a fallback."
+                        : "Touch ID isn't available on this Mac.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Generated Content") {
                     TextField("NASA API key", text: $nasaKeyDraft, prompt: Text("DEMO_KEY"))
                     Text("Used for Photo of the Day. The public demo key is rate-limited.")
