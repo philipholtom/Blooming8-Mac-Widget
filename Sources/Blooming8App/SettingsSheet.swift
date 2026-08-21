@@ -69,7 +69,7 @@ struct SettingsSheet: View {
                     }
                 }
 
-                Section("Local Folder, Favorites & Apple Photos Password") {
+                Section("Local Folder & Favorites Password") {
                     localFolderPasswordSection
                 }
 
@@ -77,7 +77,7 @@ struct SettingsSheet: View {
                     Toggle("Use Touch ID to unlock", isOn: $settings.useTouchIDForLocks)
                         .disabled(!BiometricAuth.isAvailable())
                     Text(BiometricAuth.isAvailable()
-                        ? "Applies to locked gallery tabs and Local Folder/Favorites/Apple Photos. Touch ID is tried first; the password still works as a fallback."
+                        ? "Applies to locked gallery tabs and Local Folder/Favorites. Touch ID is tried first; the password still works as a fallback."
                         : "Touch ID isn't available on this Mac.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -277,17 +277,18 @@ struct SettingsSheet: View {
 
     // MARK: - Local Folder / Favorites password
 
-    /// One password protects Local Folder, Favorites, and Apple Photos in
-    /// this app — they're really the same "your private personal photos"
-    /// concern, so there's a single lock rather than three to manage
-    /// separately. Shares storage (settings.localFolderLocked/
+    /// One password protects both Local Folder and Favorites in this app —
+    /// they're really the same "your private local photos" concern, so
+    /// there's a single lock rather than two to manage separately. Apple
+    /// Photos deliberately isn't included: the user asked for it to stay
+    /// unlocked. Shares storage (settings.localFolderLocked/
     /// localFolderPasswordHash) with the widget's own Local Folder lock, but
     /// unlocking in one app doesn't unlock the other — see
     /// PhotoController.isLocalFolderUnlocked.
     @ViewBuilder
     private var localFolderPasswordSection: some View {
         if settings.localFolderLocked {
-            Text("Local Folder, Favorites, and Apple Photos are locked behind this password in this app — unlock any of them from its lock icon in the sidebar.")
+            Text("Local Folder and Favorites are locked behind this password in this app — unlock either from its lock icon in the sidebar.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             SecureField("New password", text: $newLocalFolderPassword)
@@ -297,7 +298,7 @@ struct SettingsSheet: View {
                 Button("Remove Password", role: .destructive) { removeLocalFolderPassword() }
             }
         } else {
-            Text("Set a password to hide Local Folder, Favorites, and Apple Photos behind a lock icon in the sidebar.")
+            Text("Set a password to hide Local Folder and Favorites behind a lock icon in the sidebar.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             SecureField("Set password", text: $newLocalFolderPassword)

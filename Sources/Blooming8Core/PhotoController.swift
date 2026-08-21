@@ -662,6 +662,11 @@ public final class PhotoController: ObservableObject {
         public let fileURL: URL
         public let image: NSImage
         public let jpegData: Data
+        /// The device gallery this gets uploaded into on confirm. Local
+        /// Folder/video-frame candidates go to "Random"; Photos-library
+        /// candidates go to their own "Apple" gallery instead, so the two
+        /// sources don't mix in the same place on the frame.
+        public let gallery: String
     }
 
     /// Multiple randomly-picked candidates for the user to choose from.
@@ -695,7 +700,7 @@ public final class PhotoController: ObservableObject {
                 else {
                     continue
                 }
-                candidates.append(LocalFolderCandidate(fileURL: chosen, image: framed, jpegData: jpeg))
+                candidates.append(LocalFolderCandidate(fileURL: chosen, image: framed, jpegData: jpeg, gallery: "Random"))
             }
 
             await MainActor.run {
@@ -724,7 +729,7 @@ public final class PhotoController: ObservableObject {
             statusText = "Couldn't read '\(url.lastPathComponent)'."
             return
         }
-        localFolderCandidates = [LocalFolderCandidate(fileURL: url, image: framed, jpegData: jpeg)]
+        localFolderCandidates = [LocalFolderCandidate(fileURL: url, image: framed, jpegData: jpeg, gallery: "Random")]
         statusText = ""
     }
 
@@ -739,7 +744,7 @@ public final class PhotoController: ObservableObject {
             statusText = "Couldn't process that frame."
             return
         }
-        localFolderCandidates = [LocalFolderCandidate(fileURL: sourceURL, image: framed, jpegData: jpeg)]
+        localFolderCandidates = [LocalFolderCandidate(fileURL: sourceURL, image: framed, jpegData: jpeg, gallery: "Random")]
         statusText = ""
     }
 
@@ -759,14 +764,12 @@ public final class PhotoController: ObservableObject {
             return
         }
         let safeName = displayName.replacingOccurrences(of: "[^A-Za-z0-9_-]+", with: "-", options: .regularExpression)
-        localFolderCandidates = [LocalFolderCandidate(fileURL: URL(fileURLWithPath: safeName), image: framed, jpegData: jpeg)]
+        localFolderCandidates = [LocalFolderCandidate(fileURL: URL(fileURLWithPath: safeName), image: framed, jpegData: jpeg, gallery: "Apple")]
         statusText = ""
     }
 
-    /// Uploads the approved candidate to the frame's "Random" gallery and
-    /// displays it immediately. That gallery is meant to hold exactly one
-    /// photo at a time, so whatever's already in it is deleted first rather
-    /// than left to accumulate.
+    /// Uploads the approved candidate to its `gallery` and displays it
+    /// immediately.
     public func confirmLocalFolderCandidate(_ candidate: LocalFolderCandidate) async {
         isBusy = true
         defer { isBusy = false }
@@ -776,7 +779,7 @@ public final class PhotoController: ObservableObject {
             applyDeviceInfo(info)
             statusText = "← /deviceInfo OK"
 
-            let gallery = "Random"
+            let gallery = candidate.gallery
             statusText = "→ PUT /gallery?name=\(gallery)"
             await client.ensureGallery(ip: settings.deviceIP, name: gallery)
             statusText = "← /gallery OK"
