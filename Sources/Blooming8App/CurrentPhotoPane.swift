@@ -99,8 +99,8 @@ struct CurrentPhotoPane: View {
                     } label: {
                         Label("Random from Local Folder", systemImage: "folder")
                     }
-                    .disabled(controller.isBusy || settings.randomFolderPath.isEmpty)
-                    .help(settings.randomFolderPath.isEmpty ? "Choose a Local Folder in Settings first" : "Picks one random photo or video from Local Folder")
+                    .disabled(controller.isBusy || settings.randomFolderPath.isEmpty || isLocalFolderLocked)
+                    .help(localFolderButtonHelp)
 
                     Button("Redisplay") {
                         Task { await controller.redisplayCurrentPhoto() }
@@ -148,6 +148,20 @@ struct CurrentPhotoPane: View {
         .onChange(of: controller.galleries) { names in
             if slideshowGallery.isEmpty { slideshowGallery = names.first ?? "" }
         }
+    }
+
+    /// Same lock Local Folder itself sits behind (see Sidebar's identical
+    /// check) — this button reaches the same content from outside that
+    /// view, so it needs the same gate rather than offering a side door
+    /// around the password/Touch ID prompt.
+    private var isLocalFolderLocked: Bool {
+        settings.localFolderLocked && !controller.isLocalFolderUnlocked
+    }
+
+    private var localFolderButtonHelp: String {
+        if settings.randomFolderPath.isEmpty { return "Choose a Local Folder in Settings first" }
+        if isLocalFolderLocked { return "Local Folder is locked — unlock it from the sidebar first" }
+        return "Picks one random photo or video from Local Folder"
     }
 
     private func gallerySelectionBinding(for gallery: String) -> Binding<Bool> {

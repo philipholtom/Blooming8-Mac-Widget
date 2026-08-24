@@ -735,6 +735,13 @@ public final class PhotoController: ObservableObject {
             statusText = "Choose a Local Folder first."
             return
         }
+        // Same gate as browsing Local Folder itself — this button reaches
+        // the same content from the Frame pane, so it shouldn't offer a
+        // side door around the lock just because it lives elsewhere in the UI.
+        guard !settings.localFolderLocked || isLocalFolderUnlocked else {
+            statusText = "Local Folder is locked."
+            return
+        }
         let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
 
         statusText = "Picking a random file…"
