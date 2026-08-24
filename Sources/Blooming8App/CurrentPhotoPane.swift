@@ -114,6 +114,19 @@ struct CurrentPhotoPane: View {
 
                     Button("Save Photo…") { savePhoto() }
                         .disabled(controller.currentImageData == nil)
+
+                    Button {
+                        toggleCurrentImageFavorite()
+                    } label: {
+                        Label(
+                            isCurrentImageFavorited ? "Remove from Favorites" : "Add to Favorites",
+                            systemImage: isCurrentImageFavorited ? "star.slash" : "star"
+                        )
+                    }
+                    .disabled(controller.currentLocalSourceURL == nil)
+                    .help(controller.currentLocalSourceURL == nil
+                        ? "Only available for photos sent from Local Folder — Favorites is a bookmark list of local files"
+                        : (isCurrentImageFavorited ? "Remove this photo from Favorites" : "Add this photo to Favorites"))
                 }
 
                 GroupBox("Slideshow") {
@@ -162,6 +175,20 @@ struct CurrentPhotoPane: View {
         if settings.randomFolderPath.isEmpty { return "Choose a Local Folder in Settings first" }
         if isLocalFolderLocked { return "Local Folder is locked — unlock it from the sidebar first" }
         return "Picks one random photo or video from Local Folder"
+    }
+
+    private var isCurrentImageFavorited: Bool {
+        guard let url = controller.currentLocalSourceURL else { return false }
+        return settings.favoriteImagePaths.contains(url.path)
+    }
+
+    private func toggleCurrentImageFavorite() {
+        guard let url = controller.currentLocalSourceURL else { return }
+        if settings.favoriteImagePaths.contains(url.path) {
+            settings.favoriteImagePaths.removeAll { $0 == url.path }
+        } else {
+            settings.favoriteImagePaths.append(url.path)
+        }
     }
 
     private func gallerySelectionBinding(for gallery: String) -> Binding<Bool> {

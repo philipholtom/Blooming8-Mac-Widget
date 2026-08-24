@@ -12,6 +12,14 @@ public final class PhotoController: ObservableObject {
     /// can write the exact original file rather than a re-encoded copy.
     @Published public var currentImageData: Data?
     @Published public var currentImagePath: String?
+    /// The local file the image currently on the frame came from, if it was
+    /// sent from one (Local Folder browsing, Random from Local Folder, a
+    /// video frame) — nil for anything device-sourced (Random Photo, Show
+    /// Next, a gallery browse) or from Apple Photos, which has no real local
+    /// file to point to. Lets "Add to Favorites" on the Frame pane offer
+    /// favoriting only when it's actually meaningful, matching how
+    /// Favorites works everywhere else in the app (real local files only).
+    @Published public var currentLocalSourceURL: URL?
     @Published public var deviceName: String?
     @Published public var batteryPercent: Int?
     @Published public var currentGalleryOnDevice: String?
@@ -323,6 +331,19 @@ public final class PhotoController: ObservableObject {
         isDeviceAwake = true
     }
 
+    /// Sets `currentImagePath`, clearing `currentLocalSourceURL` unless
+    /// `path` turns out to be the same image already showing — used by the
+    /// device-truth-sync calls (refresh/redisplay/next/random/etc.), all of
+    /// which move to a path with no known local origin, but shouldn't
+    /// discard a local origin that's still correct just because the frame
+    /// was re-queried.
+    private func setCurrentImagePath(_ path: String) {
+        if path != currentImagePath {
+            currentLocalSourceURL = nil
+        }
+        currentImagePath = path
+    }
+
     private func isConnectivityError(_ error: Error) -> Bool {
         guard let urlError = error as? URLError else { return false }
         switch urlError.code {
@@ -376,7 +397,7 @@ public final class PhotoController: ObservableObject {
             statusText = "← image OK (\(Int(data.count / 1024))KB)"
             previewImage = NSImage(data: data)
             currentImageData = data
-            currentImagePath = path
+            setCurrentImagePath(path)
             statusText = "✓ Redisplayed"
         } catch {
             statusText = "✗ Redisplay failed: \(error.localizedDescription)"
@@ -398,7 +419,7 @@ public final class PhotoController: ObservableObject {
                 let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
                 previewImage = NSImage(data: data)
                 currentImageData = data
-                currentImagePath = path
+                setCurrentImagePath(path)
             }
             statusText = "Showed next image."
         } catch {
@@ -472,7 +493,7 @@ public final class PhotoController: ObservableObject {
                 let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
                 previewImage = NSImage(data: data)
                 currentImageData = data
-                currentImagePath = path
+                setCurrentImagePath(path)
             }
             statusText = ""
         } catch {
@@ -495,7 +516,7 @@ public final class PhotoController: ObservableObject {
             let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
             previewImage = NSImage(data: data)
             currentImageData = data
-            currentImagePath = path
+            setCurrentImagePath(path)
             statusText = "✓ Displayed \((path as NSString).lastPathComponent)"
         } catch {
             statusText = "✗ Couldn't display that image: \(error.localizedDescription)"
@@ -575,7 +596,7 @@ public final class PhotoController: ObservableObject {
             let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
             previewImage = NSImage(data: data)
             currentImageData = data
-            currentImagePath = path
+            setCurrentImagePath(path)
             currentGalleryOnDevice = picked.gallery
             statusText = statusMessage
         } catch {
@@ -614,7 +635,7 @@ public final class PhotoController: ObservableObject {
 
             previewImage = NSImage(data: imageData)
             currentImageData = imageData
-            currentImagePath = path
+            setCurrentImagePath(path)
             currentGalleryOnDevice = source.galleryName
             statusText = "Showed \(source.displayName)."
 
@@ -667,6 +688,14 @@ public final class PhotoController: ObservableObject {
         /// candidates go to their own "Apple" gallery instead, so the two
         /// sources don't mix in the same place on the frame.
         public let gallery: String
+        /// Whether `fileURL` is a real file on disk — true for Local
+        /// Folder/video candidates, false for Photos-library candidates
+        /// (whose `fileURL` is a synthetic, non-existent path built only to
+        /// derive an upload filename — see `preparePhotosLibraryImage`).
+        /// Determines whether `confirmLocalFolderCandidate` can offer
+        /// favoriting afterward, since Favorites is a bookmark list of real
+        /// local files everywhere else in the app.
+        public let isLocalFile: Bool
     }
 
     /// Multiple randomly-picked candidates for the user to choose from.
@@ -700,7 +729,7 @@ public final class PhotoController: ObservableObject {
                 else {
                     continue
                 }
-                candidates.append(LocalFolderCandidate(fileURL: chosen, image: framed, jpegData: jpeg, gallery: "Random"))
+                candidates.append(LocalFolderCandidate(fileURL: chosen, image: framed, jpegData: jpeg, gallery: "Random", isLocalFile: true))
             }
 
             await MainActor.run {
@@ -783,7 +812,7 @@ public final class PhotoController: ObservableObject {
             statusText = "Couldn't read '\(url.lastPathComponent)'."
             return
         }
-        localFolderCandidates = [LocalFolderCandidate(fileURL: url, image: framed, jpegData: jpeg, gallery: "Random")]
+        localFolderCandidates = [LocalFolderCandidate(fileURL: url, image: framed, jpegData: jpeg, gallery: "Random", isLocalFile: true)]
         statusText = ""
     }
 
@@ -798,7 +827,7 @@ public final class PhotoController: ObservableObject {
             statusText = "Couldn't process that frame."
             return
         }
-        localFolderCandidates = [LocalFolderCandidate(fileURL: sourceURL, image: framed, jpegData: jpeg, gallery: "Random")]
+        localFolderCandidates = [LocalFolderCandidate(fileURL: sourceURL, image: framed, jpegData: jpeg, gallery: "Random", isLocalFile: true)]
         statusText = ""
     }
 
@@ -818,7 +847,7 @@ public final class PhotoController: ObservableObject {
             return
         }
         let safeName = displayName.replacingOccurrences(of: "[^A-Za-z0-9_-]+", with: "-", options: .regularExpression)
-        localFolderCandidates = [LocalFolderCandidate(fileURL: URL(fileURLWithPath: safeName), image: framed, jpegData: jpeg, gallery: "Apple")]
+        localFolderCandidates = [LocalFolderCandidate(fileURL: URL(fileURLWithPath: safeName), image: framed, jpegData: jpeg, gallery: "Apple", isLocalFile: false)]
         statusText = ""
     }
 
@@ -854,6 +883,7 @@ public final class PhotoController: ObservableObject {
                     previewImage = candidate.image
                     currentImageData = candidate.jpegData
                     currentImagePath = path
+                    currentLocalSourceURL = candidate.isLocalFile ? candidate.fileURL : nil
                     currentGalleryOnDevice = gallery
                     statusText = "← /upload OK\n✓ Displayed \(filename)"
                     uploadSuccess = true
