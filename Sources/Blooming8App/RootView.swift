@@ -62,13 +62,13 @@ struct RootView: View {
         .onChange(of: source) { newValue in
             let resolved = newValue ?? .currentPhoto
             Self.log.notice("sidebar: selected \(resolved.title, privacy: .public)")
-            // Re-lock on the way out, matching the widget: leaving both
-            // Local Folder and Favorites means the next visit re-prompts,
-            // rather than staying unlocked for the rest of the session just
-            // because it was entered once.
-            if !isLocalFolderSource(resolved) {
-                controller.isLocalFolderUnlocked = false
-            }
+            // Deliberately no re-lock here: isLocalFolderUnlocked lives only
+            // in memory on PhotoController, so quitting the app already
+            // clears it on its own — re-locking on every navigation away
+            // (the previous behavior) meant anything outside Local Folder's
+            // own view, like the Frame pane's "Random from Local Folder"
+            // button, saw it as locked again the instant you clicked
+            // elsewhere to reach that button in the first place.
             library.load(resolved)
         }
         .onChange(of: settings.favoriteImagePaths) { _ in
