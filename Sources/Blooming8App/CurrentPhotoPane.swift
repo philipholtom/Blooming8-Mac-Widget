@@ -94,6 +94,14 @@ struct CurrentPhotoPane: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(controller.isBusy)
 
+                    Button {
+                        Task { await controller.randomFromLocalFolder() }
+                    } label: {
+                        Label("Random from Local Folder", systemImage: "folder")
+                    }
+                    .disabled(controller.isBusy || settings.randomFolderPath.isEmpty)
+                    .help(settings.randomFolderPath.isEmpty ? "Choose a Local Folder in Settings first" : "Picks one random photo or video from Local Folder")
+
                     Button("Redisplay") {
                         Task { await controller.redisplayCurrentPhoto() }
                     }

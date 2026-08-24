@@ -110,6 +110,28 @@ public enum VideoFrameExtractor {
         }.value
     }
 
+    /// One frame at a random point in the video — for a fully automatic
+    /// "surprise me" pick with no picker grid to choose from, unlike
+    /// `extractFrames`. Uses the same start/end margin as `extractFrames` so
+    /// the random draw can't land on the black frame that's common right at
+    /// either edge.
+    public static func randomFrame(from url: URL, maxPixelSize: CGFloat = 1600) async -> NSImage? {
+        guard let duration = try? await AVURLAsset(url: url).load(.duration),
+              duration.isValid, duration.seconds > 0
+        else { return nil }
+
+        let totalSeconds = duration.seconds
+        let margin = totalSeconds * 0.05
+        let usableRange = max(totalSeconds - margin * 2, 0.1)
+        let seconds = margin + Double.random(in: 0...usableRange)
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+
+        return await Task.detached(priority: .userInitiated) {
+            let generator = makeGenerator(for: url, maxPixelSize: maxPixelSize)
+            return extractOneFrame(generator: generator, around: time, slotBounds: margin...(margin + usableRange))
+        }.value
+    }
+
     /// One quick frame for a grid thumbnail — near the start but not at
     /// time zero, which is frequently black.
     public static func previewFrame(from url: URL, maxPixelSize: CGFloat = 400) async -> NSImage? {

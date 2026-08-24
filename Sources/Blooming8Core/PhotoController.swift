@@ -720,6 +720,53 @@ public final class PhotoController: ObservableObject {
         localFolderCandidates = []
     }
 
+    /// Picks one random item — image or video — from the whole Local Folder
+    /// and sends it straight to the frame, no picker step. Unlike
+    /// `prepareLocalFolderCandidate` (three image candidates for the user to
+    /// choose from) this is meant as a single "surprise me" button covering
+    /// everything in the folder, videos included: a picked video gets a
+    /// frame grabbed automatically at a random point rather than opening
+    /// `VideoFramePickerSheet` — that sheet is still there for when someone
+    /// wants to choose the video's frame deliberately, by tapping it in the
+    /// grid.
+    public func randomFromLocalFolder() async {
+        let folderPath = settings.randomFolderPath.trimmingCharacters(in: .whitespaces)
+        guard !folderPath.isEmpty else {
+            statusText = "Choose a Local Folder first."
+            return
+        }
+        let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
+
+        statusText = "Picking a random file…"
+        let (imageURLs, videoURLs) = await Task.detached(priority: .userInitiated) {
+            (ImageFolder.enumerateImages(in: folderURL), VideoFolder.enumerateVideos(in: folderURL))
+        }.value
+
+        enum Pick { case image(URL), video(URL) }
+        let pool: [Pick] = imageURLs.map { .image($0) } + videoURLs.map { .video($0) }
+        guard let picked = pool.randomElement() else {
+            statusText = "No photos or videos found in '\(folderURL.lastPathComponent)'."
+            return
+        }
+
+        switch picked {
+        case .image(let url):
+            prepareBrowsedImage(url: url)
+        case .video(let url):
+            guard let frame = await VideoFrameExtractor.randomFrame(from: url),
+                  let cgImage = frame.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            else {
+                statusText = "Couldn't grab a frame from '\(url.lastPathComponent)'."
+                return
+            }
+            prepareVideoFrame(cgImage: cgImage, sourceURL: url)
+        }
+
+        guard let candidate = localFolderCandidates.first else { return }
+        await confirmLocalFolderCandidate(candidate)
+        cancelLocalFolderCandidate()
+    }
+
     /// Loads and prepares a specific image from a file path for display/upload.
     public func prepareBrowsedImage(url: URL) {
         guard let cgImage = loadUprightCGImage(at: url),
