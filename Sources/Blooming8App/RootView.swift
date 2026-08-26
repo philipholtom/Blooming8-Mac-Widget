@@ -12,6 +12,7 @@ struct RootView: View {
 
     @State private var source: LibrarySource? = .currentPhoto
     @State private var showSettings = false
+    @State private var showLogs = false
     @State private var thumbnailSize: Double = 150
     @State private var showDeleteGalleryConfirm = false
 
@@ -76,6 +77,9 @@ struct RootView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsSheet(settings: settings, controller: controller)
+        }
+        .sheet(isPresented: $showLogs) {
+            DeviceLogsView(settings: settings)
         }
         .alert("Delete '\(activeGalleryName ?? "")'?", isPresented: $showDeleteGalleryConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -188,6 +192,13 @@ struct RootView: View {
                 }
                 .help("Download or delete '\(galleryName)'")
             }
+
+            Button {
+                showLogs = true
+            } label: {
+                Label("Device Logs", systemImage: "doc.text.magnifyingglass")
+            }
+            .help("View and download the frame's own diagnostic logs")
 
             Button {
                 showSettings = true

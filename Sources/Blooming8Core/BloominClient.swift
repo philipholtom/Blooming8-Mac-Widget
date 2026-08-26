@@ -280,6 +280,28 @@ public final class BloominClient {
         try checkStatus(response)
     }
 
+    /// Lists the frame's on-device diagnostic log files (e.g.
+    /// `2025-12-05.log`) — see `GET /log/list` in the device API docs
+    /// (https://bloomin8.readme.io/reference/get_log-list).
+    public func fetchLogList(ip: String) async throws -> [String] {
+        let url = try URL(string: baseURL(ip: ip) + "/log/list")!
+        let (data, response) = try await session.data(from: url)
+        try checkStatus(response)
+        return try JSONDecoder().decode([String].self, from: data)
+    }
+
+    /// Downloads one log file's raw text content — `GET /log/{filename}`
+    /// (https://bloomin8.readme.io/reference/get_log-filename).
+    public func fetchLogContent(ip: String, filename: String) async throws -> String {
+        let url = try URL(string: baseURL(ip: ip) + "/log/\(filename)")!
+        let (data, response) = try await session.data(from: url)
+        try checkStatus(response)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw BloominError.badResponse("log file wasn't valid text")
+        }
+        return text
+    }
+
     private func checkStatus(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else {
             throw BloominError.badResponse("no HTTP response")
