@@ -280,14 +280,25 @@ public final class BloominClient {
         try checkStatus(response)
     }
 
+    /// One entry from `/log/list`. The docs
+    /// (https://bloomin8.readme.io/reference/get_log-list) claim a bare
+    /// array of filename strings, but the device actually returns an array
+    /// of objects — confirmed directly against a real frame — same
+    /// documented-vs-actual mismatch as `/gallery/list` returning
+    /// `GalleryEntry` objects instead of bare strings too.
+    public struct LogFileInfo: Decodable, Identifiable, Hashable {
+        public let name: String
+        public let size: Int?
+        public var id: String { name }
+    }
+
     /// Lists the frame's on-device diagnostic log files (e.g.
-    /// `2025-12-05.log`) — see `GET /log/list` in the device API docs
-    /// (https://bloomin8.readme.io/reference/get_log-list).
-    public func fetchLogList(ip: String) async throws -> [String] {
+    /// `2025-12-05.log`) — see `GET /log/list` in the device API docs.
+    public func fetchLogList(ip: String) async throws -> [LogFileInfo] {
         let url = try URL(string: baseURL(ip: ip) + "/log/list")!
         let (data, response) = try await session.data(from: url)
         try checkStatus(response)
-        return try JSONDecoder().decode([String].self, from: data)
+        return try JSONDecoder().decode([LogFileInfo].self, from: data)
     }
 
     /// Downloads one log file's raw text content — `GET /log/{filename}`

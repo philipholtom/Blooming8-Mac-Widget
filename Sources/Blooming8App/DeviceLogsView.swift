@@ -12,7 +12,7 @@ struct DeviceLogsView: View {
 
     private let client = BloominClient()
 
-    @State private var filenames: [String] = []
+    @State private var files: [BloominClient.LogFileInfo] = []
     @State private var selectedFilename: String?
     @State private var logContent = ""
     @State private var isLoadingList = false
@@ -59,15 +59,15 @@ struct DeviceLogsView: View {
     /// rather than reaching for a control this codebase otherwise avoids.
     @ViewBuilder
     private var fileList: some View {
-        if let listError, filenames.isEmpty {
+        if let listError, files.isEmpty {
             message(listError, symbol: "exclamationmark.triangle")
-        } else if filenames.isEmpty, !isLoadingList {
+        } else if files.isEmpty, !isLoadingList {
             message("No log files found on the frame.", symbol: "doc.text")
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(filenames, id: \.self) { name in
-                        fileRow(name)
+                    ForEach(files) { file in
+                        fileRow(file)
                     }
                 }
                 .padding(8)
@@ -75,21 +75,28 @@ struct DeviceLogsView: View {
         }
     }
 
-    private func fileRow(_ name: String) -> some View {
-        let isSelected = selectedFilename == name
+    private func fileRow(_ file: BloominClient.LogFileInfo) -> some View {
+        let isSelected = selectedFilename == file.name
         return Button {
-            selectedFilename = name
-            Task { await loadContent(name) }
+            selectedFilename = file.name
+            Task { await loadContent(file.name) }
         } label: {
-            Text(name)
-                .font(.system(size: 12, design: .monospaced))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
-                .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .contentShape(Rectangle())
+            VStack(alignment: .leading, spacing: 1) {
+                Text(file.name)
+                    .font(.system(size: 12, design: .monospaced))
+                if let size = file.size {
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+                        .font(.caption2)
+                        .foregroundStyle(isSelected ? Color.accentColor.opacity(0.8) : .secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+            .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -151,13 +158,13 @@ struct DeviceLogsView: View {
         listError = nil
         defer { isLoadingList = false }
         do {
-            let names = try await client.fetchLogList(ip: settings.deviceIP)
+            let entries = try await client.fetchLogList(ip: settings.deviceIP)
             // Filenames are `YYYY-MM-DD.log`, so a plain reverse-lexical sort
             // puts the newest (most likely to be relevant) first.
-            filenames = names.sorted(by: >)
-            if selectedFilename == nil, let first = filenames.first {
-                selectedFilename = first
-                await loadContent(first)
+            files = entries.sorted { $0.name > $1.name }
+            if selectedFilename == nil, let first = files.first {
+                selectedFilename = first.name
+                await loadContent(first.name)
             }
         } catch {
             listError = "Couldn't list logs: \(error.localizedDescription)"
