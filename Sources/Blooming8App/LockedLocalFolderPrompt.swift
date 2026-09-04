@@ -64,11 +64,17 @@ struct LockedLocalFolderPrompt: View {
     }
 
     private func attemptUnlock() {
-        guard let hash = settings.localFolderPasswordHash,
-              PasswordHasher.hash(passwordDraft) == hash
-        else {
+        guard let hash = settings.localFolderPasswordHash else {
             showError = true
             return
+        }
+        let result = PasswordHasher.verify(passwordDraft, against: hash)
+        guard result.matched else {
+            showError = true
+            return
+        }
+        if let upgraded = result.upgradedHash {
+            settings.localFolderPasswordHash = upgraded
         }
         showError = false
         passwordDraft = ""

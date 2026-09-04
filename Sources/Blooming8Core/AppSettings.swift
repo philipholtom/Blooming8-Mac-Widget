@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import os
 
 public enum RandomWeighting: String, CaseIterable, Identifiable {
     case perPhoto
@@ -30,6 +31,14 @@ public enum AutoRandomInterval: String, CaseIterable, Identifiable {
 }
 
 public final class AppSettings: ObservableObject {
+    /// `Bundle.main.bundleIdentifier`, not a hardcoded string: this file is
+    /// shared by both products, so the subsystem needs to resolve to
+    /// whichever one is actually running for `log stream` filtering to
+    /// mean anything (unlike BLEWaker, which hardcodes the widget's
+    /// subsystem even though it's shared code too — a pre-existing
+    /// inconsistency, not a pattern worth repeating here).
+    private static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.pholtom.blooming8", category: "keychain")
+
     /// Both products read and write one store, so the frame IP, tabs,
     /// favorites and passwords stay in sync no matter which one you configure.
     ///
@@ -57,6 +66,24 @@ public final class AppSettings: ObservableObject {
     }
     @Published public var tabs: [GalleryTab] {
         didSet {
+            // Password hashes live in Keychain, not in this JSON blob (see
+            // GalleryTab's custom Codable) — keep Keychain in sync here,
+            // in the one place tabs actually change, rather than scattering
+            // writes across every call site that mutates a tab's password.
+            for tab in tabs {
+                let account = GalleryTab.keychainAccount(for: tab.id)
+                if let hash = tab.passwordHash {
+                    KeychainStore.write(hash, account: account)
+                } else {
+                    KeychainStore.delete(account: account)
+                }
+            }
+            // A tab that existed in oldValue but not anymore (deleted) would
+            // otherwise leave its Keychain entry orphaned forever.
+            let currentIDs = Set(tabs.map(\.id))
+            for removed in oldValue where !currentIDs.contains(removed.id) {
+                KeychainStore.delete(account: GalleryTab.keychainAccount(for: removed.id))
+            }
             if let data = try? JSONEncoder().encode(tabs) {
                 defaults.set(data, forKey: "galleryTabs")
             }
@@ -120,10 +147,41 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(localFolderLocked, forKey: "localFolderLocked") }
     }
 
-    /// Hash of the Local Folder password (nil if not locked).
+    /// Hash of the Local Folder password (nil if not locked). Lives in
+    /// Keychain, not this UserDefaults suite — the suite's own doc comment
+    /// above explains why it can't have real access-group protection
+    /// (no App Groups entitlement without a paid Developer ID), which is
+    /// exactly why a password hash shouldn't sit in it as plain text.
     @Published public var localFolderPasswordHash: String? {
-        didSet { defaults.set(localFolderPasswordHash, forKey: "localFolderPasswordHash") }
+        didSet {
+            if let localFolderPasswordHash {
+                KeychainStore.write(localFolderPasswordHash, account: Self.localFolderPasswordAccount)
+            } else {
+                KeychainStore.delete(account: Self.localFolderPasswordAccount)
+            }
+        }
     }
+
+    private static let localFolderPasswordAccount = "localFolderPasswordHash"
+
+    /// Bearer token for the frame's separate remote-push relay API
+    /// ("einkshot" — see `EinkshotClient`), for sending a photo over the
+    /// internet rather than the local network. Lives in Keychain under the
+    /// same service `KeychainStore` already uses for password hashes, and
+    /// the same account name a one-off `security add-generic-password` used
+    /// before this settings field existed — so a token set that way already
+    /// shows up here without needing to be re-entered.
+    @Published public var einkshotToken: String? {
+        didSet {
+            if let einkshotToken, !einkshotToken.trimmingCharacters(in: .whitespaces).isEmpty {
+                KeychainStore.write(einkshotToken, account: Self.einkshotTokenAccount)
+            } else {
+                KeychainStore.delete(account: Self.einkshotTokenAccount)
+            }
+        }
+    }
+
+    private static let einkshotTokenAccount = "einkshotDeviceToken"
 
     /// When true, unlock prompts (gallery tabs, Local Folder/Favorites) try
     /// Touch ID first and only fall back to the password field if it's
@@ -197,8 +255,36 @@ public final class AppSettings: ObservableObject {
         cropLandscapePhotos = defaults.bool(forKey: "cropLandscapePhotos")
         favoriteImagePaths = defaults.stringArray(forKey: "favoriteImagePaths") ?? []
         localFolderLocked = defaults.bool(forKey: "localFolderLocked")
-        localFolderPasswordHash = defaults.string(forKey: "localFolderPasswordHash")
+        if let fromKeychain = KeychainStore.read(account: Self.localFolderPasswordAccount) {
+            Self.log.notice("localFolderPasswordHash: read from Keychain")
+            localFolderPasswordHash = fromKeychain
+        } else if let legacy = defaults.string(forKey: "localFolderPasswordHash") {
+            // One-time migration: this was sitting in the shared
+            // UserDefaults suite as plain text before password hashes
+            // moved to Keychain.
+            Self.log.notice("localFolderPasswordHash: migrating legacy UserDefaults value into Keychain")
+            KeychainStore.write(legacy, account: Self.localFolderPasswordAccount)
+            defaults.removeObject(forKey: "localFolderPasswordHash")
+            localFolderPasswordHash = legacy
+        } else {
+            localFolderPasswordHash = nil
+        }
         useTouchIDForLocks = defaults.bool(forKey: "useTouchIDForLocks")
+        einkshotToken = KeychainStore.read(account: Self.einkshotTokenAccount)
+
+        // `tabs`'s own didSet (which re-encodes without passwordHash, now
+        // that it's migrated into Keychain during decode above — see
+        // GalleryTab.init(from:)) does NOT fire for the assignment above:
+        // Swift skips property observers when a property is set inside its
+        // own initializer. Without this, a tab whose hash just migrated
+        // out of the decoded blob would sit there completely unchanged,
+        // legacy hash and all, until something unrelated happened to
+        // touch `tabs` again — possibly never. Redone here, now that every
+        // stored property (including `defaults` and `tabs` itself) is set
+        // and `self` can be used.
+        if let data = try? JSONEncoder().encode(tabs) {
+            defaults.set(data, forKey: "galleryTabs")
+        }
     }
 
     /// The widget stored everything in the standard domain before the app

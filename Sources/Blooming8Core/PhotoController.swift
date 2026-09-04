@@ -166,7 +166,15 @@ public final class PhotoController: ObservableObject {
             unlockedTabIDs.insert(tab.id)
             return true
         }
-        guard PasswordHasher.hash(password) == hash else { return false }
+        let result = PasswordHasher.verify(password, against: hash)
+        guard result.matched else { return false }
+        if let upgraded = result.upgradedHash, let index = settings.tabs.firstIndex(where: { $0.id == tab.id }) {
+            // The stored hash was still in the old unsalted format — swap
+            // in a freshly-salted one now that the password's been proven
+            // correct, so this tab isn't re-verified against the weak
+            // format again next time.
+            settings.tabs[index].passwordHash = upgraded
+        }
         unlockedTabIDs.insert(tab.id)
         return true
     }
@@ -219,7 +227,7 @@ public final class PhotoController: ObservableObject {
                     failed += 1
                     continue
                 }
-                let baseName = url.deletingPathExtension().lastPathComponent
+                let baseName = sanitizeFilenameComponent(url.deletingPathExtension().lastPathComponent)
                 let filename = portraitFilename("\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(index)")
                 do {
                     _ = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: trimmedGallery, imageData: jpeg, showNow: false)
@@ -657,6 +665,20 @@ public final class PhotoController: ObservableObject {
         "\(base)_P.jpg"
     }
 
+    /// Strips anything that isn't a plain ASCII letter/digit/underscore/
+    /// hyphen out of a filename component before it becomes part of an
+    /// upload filename. A local file's real name can contain spaces,
+    /// apostrophes, parentheses, unicode, commas, and other characters the
+    /// frame's firmware doesn't accept in `/upload`'s `filename` parameter
+    /// — confirmed directly against the device: it logs "Invalid filename
+    /// or extension" and rejects the whole upload outright, before ever
+    /// logging what was actually attempted. Photos-library candidates
+    /// already sanitized their (human-readable date, not a real filename)
+    /// name for the same reason; this brings every other source in line.
+    private func sanitizeFilenameComponent(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "[^A-Za-z0-9_-]+", with: "-", options: .regularExpression)
+    }
+
     /// Fits `cgImage` onto a `width`x`height` portrait canvas, choosing
     /// aspect-fill (crop and center, no bars) over aspect-fit (whole photo
     /// visible, letterboxed) only when both `cropLandscapePhotos` is true and
@@ -846,7 +868,7 @@ public final class PhotoController: ObservableObject {
             statusText = "Couldn't process that photo."
             return
         }
-        let safeName = displayName.replacingOccurrences(of: "[^A-Za-z0-9_-]+", with: "-", options: .regularExpression)
+        let safeName = sanitizeFilenameComponent(displayName)
         localFolderCandidates = [LocalFolderCandidate(fileURL: URL(fileURLWithPath: safeName), image: framed, jpegData: jpeg, gallery: "Apple", isLocalFile: false)]
         statusText = ""
     }
@@ -867,7 +889,7 @@ public final class PhotoController: ObservableObject {
             await client.ensureGallery(ip: settings.deviceIP, name: gallery)
             statusText = "← /gallery OK"
 
-            let sourceBase = candidate.fileURL.deletingPathExtension().lastPathComponent
+            let sourceBase = sanitizeFilenameComponent(candidate.fileURL.deletingPathExtension().lastPathComponent)
             let timestamp = Int(Date().timeIntervalSince1970)
             let filename = portraitFilename("\(sourceBase)_\(timestamp)")
             let fileSizeKB = Int(candidate.jpegData.count / 1024)

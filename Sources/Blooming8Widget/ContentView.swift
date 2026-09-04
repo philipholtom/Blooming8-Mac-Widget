@@ -1031,14 +1031,21 @@ struct ContentView: View {
     }
 
     private func attemptLocalFolderUnlock() {
-        if let hash = settings.localFolderPasswordHash,
-           PasswordHasher.hash(localFolderPasswordDraft) == hash {
-            localFolderPasswordError = false
-            localFolderPasswordDraft = ""
-            localFolderUnlocked = true
-        } else {
+        guard let hash = settings.localFolderPasswordHash else {
             localFolderPasswordError = true
+            return
         }
+        let result = PasswordHasher.verify(localFolderPasswordDraft, against: hash)
+        guard result.matched else {
+            localFolderPasswordError = true
+            return
+        }
+        if let upgraded = result.upgradedHash {
+            settings.localFolderPasswordHash = upgraded
+        }
+        localFolderPasswordError = false
+        localFolderPasswordDraft = ""
+        localFolderUnlocked = true
     }
 
     private var localFolderPasswordSetupSheet: some View {
