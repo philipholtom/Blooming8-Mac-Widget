@@ -13,6 +13,7 @@ struct RootView: View {
     @State private var source: LibrarySource? = .currentPhoto
     @State private var showSettings = false
     @State private var showLogs = false
+    @State private var showSendRemotely = false
     @State private var thumbnailSize: Double = 150
     @State private var showDeleteGalleryConfirm = false
 
@@ -80,6 +81,9 @@ struct RootView: View {
         }
         .sheet(isPresented: $showLogs) {
             DeviceLogsView(settings: settings)
+        }
+        .sheet(isPresented: $showSendRemotely) {
+            SendRemotelyView(settings: settings, controller: controller)
         }
         .alert("Delete '\(activeGalleryName ?? "")'?", isPresented: $showDeleteGalleryConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -199,6 +203,13 @@ struct RootView: View {
                 Label("Device Logs", systemImage: "doc.text.magnifyingglass")
             }
             .help("View and download the frame's own diagnostic logs")
+
+            Button {
+                showSendRemotely = true
+            } label: {
+                Label("Send Remotely", systemImage: "antenna.radiowaves.left.and.right")
+            }
+            .help("Push a photo to the frame over the internet, not just your home network")
 
             Button {
                 showSettings = true

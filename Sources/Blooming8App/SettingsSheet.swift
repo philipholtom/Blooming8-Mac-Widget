@@ -25,6 +25,7 @@ struct SettingsSheet: View {
     @State private var passwordDrafts: [UUID: String] = [:]
     @State private var newLocalFolderPassword = ""
     @State private var showConnectCanvas = false
+    @State private var einkshotTokenDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -42,6 +43,25 @@ struct SettingsSheet: View {
                         Button("Scan\u{2026}") { showConnectCanvas = true }
                     }
                     Text("The Bluetooth name is used to wake the frame when it's asleep and stops answering over Wi-Fi.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Remote Push") {
+                    SecureField("API token", text: $einkshotTokenDraft, prompt: Text(settings.einkshotToken == nil ? "Not set" : "Token is set — enter a new one to replace it"))
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(saveEinkshotToken)
+                    HStack {
+                        Button("Save Token") { saveEinkshotToken() }
+                            .disabled(einkshotTokenDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                        if settings.einkshotToken != nil {
+                            Button("Remove Token", role: .destructive) {
+                                settings.einkshotToken = nil
+                                einkshotTokenDraft = ""
+                            }
+                        }
+                    }
+                    Text("Lets Send Remotely push a photo to the frame over the internet, not just your home network. Get a token from the Bloomin8 phone app: Devices tab → device card → ⋮ menu → API Token.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -305,6 +325,13 @@ struct SettingsSheet: View {
             Button("Set Password") { setLocalFolderPassword() }
                 .disabled(newLocalFolderPassword.isEmpty)
         }
+    }
+
+    private func saveEinkshotToken() {
+        let trimmed = einkshotTokenDraft.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        settings.einkshotToken = trimmed
+        einkshotTokenDraft = ""
     }
 
     private func setLocalFolderPassword() {
