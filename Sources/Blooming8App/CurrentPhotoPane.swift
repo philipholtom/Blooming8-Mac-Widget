@@ -238,16 +238,22 @@ struct GeneratedPane: View {
                             }
                         ))
                         Spacer()
-                        Button {
-                            pickerSource = source
-                            showPicker = true
-                        } label: {
-                            Image(systemName: "eye")
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                        .disabled(controller.isBusy)
-                        .help("Preview a few \(source.displayName) options before sending one, instead of generating one blind")
+                        // Plain .onTapGesture, not Button: this row's tap
+                        // target showed the same intermittent missed-click
+                        // behavior on this OS as the candidate picker grids
+                        // (see ContentSourcePickerSheet/VideoFramePickerSheet)
+                        // — a tap could fire against a stale target and open
+                        // the picker for the wrong source (always the first
+                        // row, APOD) instead of the one actually tapped.
+                        Image(systemName: "eye")
+                            .foregroundStyle(controller.isBusy ? .quaternary : .secondary)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                guard !controller.isBusy else { return }
+                                pickerSource = source
+                                showPicker = true
+                            }
+                            .help("Preview a few \(source.displayName) options before sending one, instead of generating one blind")
                     }
                 }
 
@@ -265,7 +271,15 @@ struct GeneratedPane: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .sheet(isPresented: $showPicker) {
+            // .id(pickerSource.id) forces SwiftUI to treat each source as a
+            // genuinely distinct view rather than reusing the previous
+            // sheet's identity — without it, the sheet's own @State (and its
+            // one-shot .task that fetches candidates) carried over from
+            // whichever source was previewed last, so the title bar showed
+            // the newly tapped source but the images were the previous
+            // source's stale candidates until "Next" was pressed manually.
             ContentSourcePickerSheet(source: pickerSource, controller: controller)
+                .id(pickerSource.id)
         }
     }
 }

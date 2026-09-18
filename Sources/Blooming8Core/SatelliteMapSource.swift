@@ -21,6 +21,18 @@ public struct SatelliteMapSource: ContentSource {
     /// bands), not just the sky directly overhead.
     private let halfSpan: Double = 6
 
+    /// Four instruments GIBS serves true-color imagery from. The scene over
+    /// one location can look near-identical day to day if it's always the
+    /// same instrument, so which one is used is randomized per generation —
+    /// but the location and "most recent available" behavior stay exactly
+    /// as configured, unlike a randomized date or offset.
+    private static let layers = [
+        "VIIRS_SNPP_CorrectedReflectance_TrueColor",
+        "VIIRS_NOAA20_CorrectedReflectance_TrueColor",
+        "MODIS_Terra_CorrectedReflectance_TrueColor",
+        "MODIS_Aqua_CorrectedReflectance_TrueColor"
+    ]
+
     public func generateImage(settings: AppSettings) async throws -> Data {
         guard settings.weatherLatitude != 0 || settings.weatherLongitude != 0 else {
             throw ContentSourceError.message("Set your location under Settings → Generated Content → Weather first")
@@ -36,48 +48,51 @@ public struct SatelliteMapSource: ContentSource {
         let bbox = "\(lat - halfSpan),\(lon - halfSpan),\(lat + halfSpan),\(lon + halfSpan)"
 
         var lastError: Error = ContentSourceError.message("Couldn't reach the satellite imagery service")
-        // Recent satellite passes can be cloud-free over the whole scene or
-        // just not composited yet for a given day — try a few, most recent
-        // first, most likely to actually have data.
-        for daysAgo in 0...3 {
-            let date = dateString(daysAgo: daysAgo)
-            var components = URLComponents(string: "https://wvs.earthdata.nasa.gov/api/v1/snapshot")!
-            components.queryItems = [
-                URLQueryItem(name: "REQUEST", value: "GetSnapshot"),
-                URLQueryItem(name: "LAYERS", value: "VIIRS_SNPP_CorrectedReflectance_TrueColor"),
-                URLQueryItem(name: "CRS", value: "EPSG:4326"),
-                URLQueryItem(name: "TIME", value: date),
-                URLQueryItem(name: "WRAP", value: "DAY"),
-                URLQueryItem(name: "BBOX", value: bbox),
-                URLQueryItem(name: "FORMAT", value: "image/jpeg"),
-                URLQueryItem(name: "WIDTH", value: String(width)),
-                URLQueryItem(name: "HEIGHT", value: String(height))
-            ]
-            do {
-                let (data, response) = try await URLSession.shared.data(from: components.url!)
-                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                    lastError = ContentSourceError.message("Satellite imagery service returned an error")
-                    continue
+        // For the randomly picked instrument, try the most recent day first
+        // and fall further back only if that day's pass wasn't composited
+        // yet; only move on to another instrument if this one has no recent
+        // data at all.
+        for layer in Self.layers.shuffled() {
+            for daysAgo in 0...3 {
+                let date = dateString(daysAgo: daysAgo)
+                var components = URLComponents(string: "https://wvs.earthdata.nasa.gov/api/v1/snapshot")!
+                components.queryItems = [
+                    URLQueryItem(name: "REQUEST", value: "GetSnapshot"),
+                    URLQueryItem(name: "LAYERS", value: layer),
+                    URLQueryItem(name: "CRS", value: "EPSG:4326"),
+                    URLQueryItem(name: "TIME", value: date),
+                    URLQueryItem(name: "WRAP", value: "DAY"),
+                    URLQueryItem(name: "BBOX", value: bbox),
+                    URLQueryItem(name: "FORMAT", value: "image/jpeg"),
+                    URLQueryItem(name: "WIDTH", value: String(width)),
+                    URLQueryItem(name: "HEIGHT", value: String(height))
+                ]
+                do {
+                    let (data, response) = try await URLSession.shared.data(from: components.url!)
+                    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                        lastError = ContentSourceError.message("Satellite imagery service returned an error")
+                        continue
+                    }
+                    // A failed/empty composite still comes back 200 with a
+                    // tiny placeholder — a real 1200x1600 true-color JPEG is
+                    // never this small.
+                    guard data.count > 20_000 else {
+                        lastError = ContentSourceError.message("No satellite imagery available for that date")
+                        continue
+                    }
+                    guard let cgImage = loadUprightCGImage(data: data) else {
+                        lastError = ContentSourceError.message("Couldn't decode the satellite image")
+                        continue
+                    }
+                    let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+                    guard let jpeg = ImageCanvas.jpegData(image) else {
+                        lastError = ContentSourceError.message("Couldn't render the satellite image")
+                        continue
+                    }
+                    return jpeg
+                } catch {
+                    lastError = error
                 }
-                // A failed/empty composite still comes back 200 with a tiny
-                // placeholder — a real 1200x1600 true-color JPEG is never
-                // this small.
-                guard data.count > 20_000 else {
-                    lastError = ContentSourceError.message("No satellite imagery available for that date")
-                    continue
-                }
-                guard let cgImage = loadUprightCGImage(data: data) else {
-                    lastError = ContentSourceError.message("Couldn't decode the satellite image")
-                    continue
-                }
-                let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-                guard let jpeg = ImageCanvas.jpegData(image) else {
-                    lastError = ContentSourceError.message("Couldn't render the satellite image")
-                    continue
-                }
-                return jpeg
-            } catch {
-                lastError = error
             }
         }
         throw lastError
