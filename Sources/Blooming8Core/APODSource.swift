@@ -4,6 +4,8 @@ import AppKit
 /// date and description overlaid. Ported from random_apod_framed.py — the
 /// layout constants below match that script exactly.
 public struct APODSource: ContentSource {
+    public init() {}
+
     public let id = "apod"
     public let displayName = "NASA Photo of the Day"
     public let galleryName = "NASA"

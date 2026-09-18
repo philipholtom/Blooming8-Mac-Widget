@@ -35,6 +35,13 @@ public enum ContentSources {
         WeatherSource(),
         MoonPhaseSource(),
         HistorySource(),
-        PeriodicTableSource()
+        PeriodicTableSource(),
+        MarsRoverSource(),
+        EPICSource(),
+        MuseumArtSource(),
+        WikipediaPOTDSource(),
+        CatPhotoSource(),
+        DogPhotoSource(),
+        SatelliteMapSource()
     ]
 }

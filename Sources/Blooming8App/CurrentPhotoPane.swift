@@ -218,6 +218,9 @@ struct GeneratedPane: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var controller: PhotoController
 
+    @State private var showPicker = false
+    @State private var pickerSource: ContentSource = APODSource()
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -226,13 +229,26 @@ struct GeneratedPane: View {
                     .foregroundStyle(.secondary)
 
                 ForEach(ContentSources.all, id: \.id) { source in
-                    Toggle(source.displayName, isOn: Binding(
-                        get: { settings.selectedContentSources.contains(source.id) },
-                        set: { on in
-                            if on { settings.selectedContentSources.insert(source.id) }
-                            else { settings.selectedContentSources.remove(source.id) }
+                    HStack {
+                        Toggle(source.displayName, isOn: Binding(
+                            get: { settings.selectedContentSources.contains(source.id) },
+                            set: { on in
+                                if on { settings.selectedContentSources.insert(source.id) }
+                                else { settings.selectedContentSources.remove(source.id) }
+                            }
+                        ))
+                        Spacer()
+                        Button {
+                            pickerSource = source
+                            showPicker = true
+                        } label: {
+                            Image(systemName: "eye")
                         }
-                    ))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .disabled(controller.isBusy)
+                        .help("Preview a few \(source.displayName) options before sending one, instead of generating one blind")
+                    }
                 }
 
                 Button {
@@ -247,6 +263,9 @@ struct GeneratedPane: View {
             .padding(24)
             .frame(maxWidth: 620, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .sheet(isPresented: $showPicker) {
+            ContentSourcePickerSheet(source: pickerSource, controller: controller)
         }
     }
 }

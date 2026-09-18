@@ -5,6 +5,8 @@ import AppKit
 /// fortune_art_uploader.py), falling back to a bundled quote list so this
 /// works out of the box without any extra install.
 public struct FortuneSource: ContentSource {
+    public init() {}
+
     public let id = "fortune"
     public let displayName = "Fortune"
     public let galleryName = "Fortune"

@@ -19,6 +19,9 @@ struct SettingsSheet: View {
     @State private var weatherLocationNameDraft = ""
     @State private var weatherLatitudeDraft = ""
     @State private var weatherLongitudeDraft = ""
+    @State private var isLookingUpLocation = false
+    @State private var locationResults: [GeocodingResult] = []
+    @State private var locationLookupError: String?
     @State private var historyHighlightYearDraft = ""
 
     @State private var newTabName = ""
@@ -109,8 +112,39 @@ struct SettingsSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    TextField("Weather location name", text: $weatherLocationNameDraft)
-                        .textFieldStyle(.roundedBorder)
+                    HStack {
+                        TextField("Weather location name", text: $weatherLocationNameDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(lookUpLocation)
+                        Button {
+                            lookUpLocation()
+                        } label: {
+                            if isLookingUpLocation {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Text("Look Up")
+                            }
+                        }
+                        .disabled(isLookingUpLocation || weatherLocationNameDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                    if !locationResults.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(locationResults) { result in
+                                Button(result.displayLabel) { applyLocation(result) }
+                                    .buttonStyle(.plain)
+                                    .font(.caption)
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                        .padding(8)
+                        .background(Color.gray.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    if let locationLookupError {
+                        Text(locationLookupError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                     LabeledContent("Coordinates") {
                         HStack {
                             TextField("Latitude", text: $weatherLatitudeDraft)
@@ -119,6 +153,9 @@ struct SettingsSheet: View {
                                 .textFieldStyle(.roundedBorder)
                         }
                     }
+                    Text("Type a town or city and click Look Up, or enter coordinates directly below.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
                     TextField("History highlight year", text: $historyHighlightYearDraft, prompt: Text("1979"))
                     Text("If today has a historical event from this year, it's always shown first.")
@@ -325,6 +362,37 @@ struct SettingsSheet: View {
             Button("Set Password") { setLocalFolderPassword() }
                 .disabled(newLocalFolderPassword.isEmpty)
         }
+    }
+
+    private func lookUpLocation() {
+        let query = weatherLocationNameDraft.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return }
+        isLookingUpLocation = true
+        locationLookupError = nil
+        locationResults = []
+        Task {
+            defer { isLookingUpLocation = false }
+            do {
+                let results = try await GeocodingClient.search(name: query)
+                if results.isEmpty {
+                    locationLookupError = "No matches for '\(query)'."
+                } else if results.count == 1 {
+                    applyLocation(results[0])
+                } else {
+                    locationResults = results
+                }
+            } catch {
+                locationLookupError = error.localizedDescription
+            }
+        }
+    }
+
+    private func applyLocation(_ result: GeocodingResult) {
+        weatherLocationNameDraft = result.name
+        weatherLatitudeDraft = String(result.latitude)
+        weatherLongitudeDraft = String(result.longitude)
+        locationResults = []
+        locationLookupError = nil
     }
 
     private func saveEinkshotToken() {

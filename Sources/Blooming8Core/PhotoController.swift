@@ -771,6 +771,35 @@ public final class PhotoController: ObservableObject {
         localFolderCandidates = []
     }
 
+    /// Fetches 3 random renders from any `ContentSource` and presents them
+    /// as candidates, same "look at a few, Next for more, confirm before
+    /// sending" pattern as `prepareLocalFolderCandidate` — worth it for a
+    /// source whose output varies a lot per call (APOD's genuinely random
+    /// day from the whole archive, Fortune's random quote+style), where
+    /// `showRandomGeneratedContent`'s one-shot generate-and-display never
+    /// let you see what you'd get before it was already on the frame.
+    /// Sequential, not concurrent: APOD's public NASA key is already
+    /// rate-limited, and each source's own `generateImage` already retries
+    /// internally where that makes sense (APOD skips video-only dates), so
+    /// 3 fetches back to back is enough load already.
+    public func prepareContentCandidates(source: ContentSource) async {
+        statusText = "Generating \(source.displayName) options…"
+        var candidates: [LocalFolderCandidate] = []
+        for index in 0..<3 {
+            guard let jpeg = try? await source.generateImage(settings: settings),
+                  let image = NSImage(data: jpeg)
+            else { continue }
+            let name = "\(source.id)_\(Int(Date().timeIntervalSince1970 * 1000))_\(index)"
+            candidates.append(LocalFolderCandidate(fileURL: URL(fileURLWithPath: name), image: image, jpegData: jpeg, gallery: source.galleryName, isLocalFile: false))
+        }
+        guard !candidates.isEmpty else {
+            statusText = "Couldn't generate any \(source.displayName) options right now."
+            return
+        }
+        localFolderCandidates = candidates
+        statusText = ""
+    }
+
     /// Picks one random item — image or video — from the whole Local Folder
     /// and sends it straight to the frame, no picker step. Unlike
     /// `prepareLocalFolderCandidate` (three image candidates for the user to
