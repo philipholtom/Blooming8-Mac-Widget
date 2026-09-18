@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsSheet: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var controller: PhotoController
+    @ObservedObject var scheduledSendManager: ScheduledSendManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var ipDraft = ""
@@ -29,6 +30,7 @@ struct SettingsSheet: View {
     @State private var newLocalFolderPassword = ""
     @State private var showConnectCanvas = false
     @State private var einkshotTokenDraft = ""
+    @State private var showScheduledSendPhotoPicker = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -171,6 +173,10 @@ struct SettingsSheet: View {
                     autoRandomSection
                 }
 
+                Section("Scheduled Send") {
+                    scheduledSendSection
+                }
+
                 Section("Tabs") {
                     tabsSection
                 }
@@ -195,6 +201,11 @@ struct SettingsSheet: View {
                 if let ip {
                     ipDraft = ip
                 }
+            }
+        }
+        .sheet(isPresented: $showScheduledSendPhotoPicker) {
+            ScheduledSendPhotoPickerSheet(settings: settings, controller: controller) { devicePath in
+                settings.scheduledSend?.devicePath = devicePath
             }
         }
         .onAppear {
@@ -304,6 +315,105 @@ struct SettingsSheet: View {
             set: { newDate in
                 let dc = Calendar.current.dateComponents([.hour, .minute], from: newDate)
                 settings.autoRandomDailyMinute = (dc.hour ?? 0) * 60 + (dc.minute ?? 0)
+            }
+        )
+    }
+
+    // MARK: - Scheduled send
+
+    @ViewBuilder
+    private var scheduledSendSection: some View {
+        Toggle("Send a specific photo on a schedule", isOn: scheduledSendEnabledBinding)
+
+        if let schedule = settings.scheduledSend, schedule.isEnabled {
+            HStack {
+                Text(schedule.devicePath.isEmpty ? "No photo chosen" : (schedule.devicePath as NSString).lastPathComponent)
+                    .foregroundStyle(schedule.devicePath.isEmpty ? .secondary : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button("Choose Photo…") {
+                    showScheduledSendPhotoPicker = true
+                }
+            }
+
+            DatePicker("At", selection: scheduledSendTimeBinding, displayedComponents: .hourAndMinute)
+
+            HStack(spacing: 4) {
+                Text("Days")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                ForEach(Weekday.displayOrder) { day in
+                    Toggle(day.shortLabel, isOn: scheduledSendDayBinding(day))
+                        .toggleStyle(.button)
+                        .font(.caption2)
+                }
+            }
+
+            Toggle("Only if a hidden gallery photo is currently displayed", isOn: scheduledSendHiddenGalleryBinding)
+                .help("Skips sending unless the frame is currently showing a photo from a locked gallery tab, or Local Folder/Favorites while locked — use this to revert the display automatically without interrupting anything you're intentionally showing.")
+
+            if schedule.devicePath.isEmpty {
+                Text("Choose a photo above to activate this schedule.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if schedule.days.isEmpty {
+                Text("Pick at least one day.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if let next = scheduledSendManager.nextFireDate {
+                Label("Next scheduled send: \(next.formatted(date: .abbreviated, time: .shortened))", systemImage: "clock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var scheduledSendEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { settings.scheduledSend?.isEnabled ?? false },
+            set: { on in
+                if settings.scheduledSend == nil {
+                    settings.scheduledSend = ScheduledSend(isEnabled: on)
+                } else {
+                    settings.scheduledSend?.isEnabled = on
+                }
+            }
+        )
+    }
+
+    private var scheduledSendTimeBinding: Binding<Date> {
+        Binding(
+            get: {
+                var components = DateComponents()
+                let minutes = settings.scheduledSend?.timeMinutes ?? 17 * 60
+                components.hour = minutes / 60
+                components.minute = minutes % 60
+                return Calendar.current.date(from: components) ?? Date()
+            },
+            set: { newDate in
+                let dc = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                settings.scheduledSend?.timeMinutes = (dc.hour ?? 0) * 60 + (dc.minute ?? 0)
+            }
+        )
+    }
+
+    private var scheduledSendHiddenGalleryBinding: Binding<Bool> {
+        Binding(
+            get: { settings.scheduledSend?.requireHiddenGalleryDisplayed ?? true },
+            set: { settings.scheduledSend?.requireHiddenGalleryDisplayed = $0 }
+        )
+    }
+
+    private func scheduledSendDayBinding(_ day: Weekday) -> Binding<Bool> {
+        Binding(
+            get: { settings.scheduledSend?.days.contains(day) ?? false },
+            set: { isOn in
+                if isOn {
+                    settings.scheduledSend?.days.insert(day)
+                } else {
+                    settings.scheduledSend?.days.remove(day)
+                }
             }
         )
     }

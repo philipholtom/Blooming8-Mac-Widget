@@ -8,6 +8,7 @@ struct RootView: View {
 
     @ObservedObject var settings: AppSettings
     @ObservedObject var controller: PhotoController
+    @ObservedObject var scheduledSendManager: ScheduledSendManager
     @StateObject private var library: LibraryModel
 
     @State private var source: LibrarySource? = .currentPhoto
@@ -17,9 +18,10 @@ struct RootView: View {
     @State private var thumbnailSize: Double = 150
     @State private var showDeleteGalleryConfirm = false
 
-    init(settings: AppSettings, controller: PhotoController) {
+    init(settings: AppSettings, controller: PhotoController, scheduledSendManager: ScheduledSendManager) {
         self.settings = settings
         self.controller = controller
+        self.scheduledSendManager = scheduledSendManager
         _library = StateObject(wrappedValue: LibraryModel(settings: settings, controller: controller))
     }
 
@@ -77,7 +79,7 @@ struct RootView: View {
             if activeSource == .favorites { library.load(.favorites) }
         }
         .sheet(isPresented: $showSettings) {
-            SettingsSheet(settings: settings, controller: controller)
+            SettingsSheet(settings: settings, controller: controller, scheduledSendManager: scheduledSendManager)
         }
         .sheet(isPresented: $showLogs) {
             DeviceLogsView(settings: settings)

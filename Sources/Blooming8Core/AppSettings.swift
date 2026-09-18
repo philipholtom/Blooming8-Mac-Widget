@@ -191,6 +191,19 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(useTouchIDForLocks, forKey: "useTouchIDForLocks") }
     }
 
+    /// One photo scheduled to send at a fixed time on chosen days — see
+    /// `ScheduledSend`. Persisted as JSON, same pattern as `tabs`, since it's
+    /// a single struct rather than a UserDefaults-primitive value.
+    @Published public var scheduledSend: ScheduledSend? {
+        didSet {
+            if let scheduledSend, let data = try? JSONEncoder().encode(scheduledSend) {
+                defaults.set(data, forKey: "scheduledSend")
+            } else {
+                defaults.removeObject(forKey: "scheduledSend")
+            }
+        }
+    }
+
     public convenience init() {
         self.init(defaults: UserDefaults(suiteName: AppSettings.suiteName) ?? .standard)
     }
@@ -271,6 +284,12 @@ public final class AppSettings: ObservableObject {
         }
         useTouchIDForLocks = defaults.bool(forKey: "useTouchIDForLocks")
         einkshotToken = KeychainStore.read(account: Self.einkshotTokenAccount)
+        if let data = defaults.data(forKey: "scheduledSend"),
+           let decoded = try? JSONDecoder().decode(ScheduledSend.self, from: data) {
+            scheduledSend = decoded
+        } else {
+            scheduledSend = nil
+        }
 
         // `tabs`'s own didSet (which re-encodes without passwordHash, now
         // that it's migrated into Keychain during decode above — see

@@ -10,11 +10,13 @@ import os
 final class AppEnvironment: ObservableObject {
     let settings: AppSettings
     let controller: PhotoController
+    let scheduledSendManager: ScheduledSendManager
 
     init() {
         let settings = AppSettings()
         self.settings = settings
         self.controller = PhotoController(settings: settings)
+        self.scheduledSendManager = ScheduledSendManager(controller: controller, settings: settings)
     }
 }
 
@@ -48,7 +50,7 @@ struct Blooming8AppMain: App {
 
     var body: some Scene {
         WindowGroup(id: "main") {
-            RootView(settings: env.settings, controller: env.controller)
+            RootView(settings: env.settings, controller: env.controller, scheduledSendManager: env.scheduledSendManager)
                 .frame(minWidth: 900, minHeight: 560)
                 .onAppear {
                     Self.log.notice("app: window appeared")

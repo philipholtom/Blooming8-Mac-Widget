@@ -854,6 +854,46 @@ public final class PhotoController: ObservableObject {
         cancelLocalFolderCandidate()
     }
 
+    /// True if the image currently on the frame belongs to a gallery that
+    /// counts as hidden — a gallery tab with a password set (checked
+    /// regardless of any in-session unlock, since a background schedule
+    /// check isn't a "session" in that sense), or the "Random" gallery
+    /// (every Local Folder/Favorites/video-frame upload's fixed destination
+    /// — see `LocalFolderCandidate.gallery`), which is always treated as
+    /// hidden here regardless of whether the separate Local Folder password
+    /// is currently on — anything landing in Random came from this Mac's
+    /// own files, not frame content, so a scheduled revert should always be
+    /// willing to cover for it. Checked against `currentGalleryOnDevice` —
+    /// device truth refreshed from `/deviceInfo` — rather than
+    /// `currentLocalSourceURL`, which only reflects this session's most
+    /// recent upload and goes nil the instant anything else is redisplayed,
+    /// even a re-display of that same hidden photo. Used by the
+    /// scheduled-send safety net to decide whether reverting is warranted.
+    public var isCurrentlyDisplayingHiddenGallery: Bool {
+        guard let currentGalleryOnDevice else { return false }
+        if currentGalleryOnDevice == "Random" {
+            return true
+        }
+        return settings.lockedTab(for: currentGalleryOnDevice, unlockedTabIDs: []) != nil
+    }
+
+    /// Re-displays `schedule`'s photo (already on the frame) right now,
+    /// honoring its `requireHiddenGalleryDisplayed` condition. Called by the
+    /// App target's own timer at the schedule's configured time — reuses
+    /// `showImageAtPath`, the same "show this exact device photo" pipeline a
+    /// gallery-grid tap on an already-uploaded item goes through, since
+    /// nothing needs to be re-uploaded here.
+    public func fireScheduledSend(_ schedule: ScheduledSend) async {
+        guard !schedule.devicePath.isEmpty else {
+            statusText = "Scheduled send has no photo chosen."
+            return
+        }
+        if schedule.requireHiddenGalleryDisplayed && !isCurrentlyDisplayingHiddenGallery {
+            return
+        }
+        await showImageAtPath(schedule.devicePath)
+    }
+
     /// Loads and prepares a specific image from a file path for display/upload.
     public func prepareBrowsedImage(url: URL) {
         guard let cgImage = loadUprightCGImage(at: url),
