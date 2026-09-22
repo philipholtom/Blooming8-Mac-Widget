@@ -16,6 +16,7 @@ struct LibraryGrid: View {
     /// the alert. A destructive, one-way action on the device, so it's
     /// confirmed regardless of whether it's one image or a whole selection.
     @State private var pendingDeletion: [LibraryItem]?
+    @State private var pendingMove: [LibraryItem]?
     @State private var isDropTargeted = false
 
     /// The gallery currently being browsed, if any — used both to know
@@ -44,6 +45,15 @@ struct LibraryGrid: View {
         .sheet(item: $videoForFramePicker) { item in
             if let url = item.url {
                 VideoFramePickerSheet(videoURL: url, controller: controller)
+            }
+        }
+        .sheet(isPresented: Binding(get: { pendingMove != nil }, set: { if !$0 { pendingMove = nil } })) {
+            MoveToGallerySheet(
+                items: pendingMove ?? [],
+                controller: controller,
+                excludedGalleryName: currentGalleryName
+            ) { moved in
+                for item in moved { library.removeItem(item) }
             }
         }
         .alert(
@@ -223,6 +233,9 @@ struct LibraryGrid: View {
         let deletableTargets = targets.filter { $0.galleryName != nil }
         if !deletableTargets.isEmpty {
             Divider()
+            Button(deletableTargets.count == 1 ? "Move to Gallery…" : "Move \(deletableTargets.count) to Gallery…") {
+                pendingMove = deletableTargets
+            }
             Button(deletableTargets.count == 1 ? "Delete from Frame…" : "Delete \(deletableTargets.count) from Frame…", role: .destructive) {
                 pendingDeletion = deletableTargets
             }

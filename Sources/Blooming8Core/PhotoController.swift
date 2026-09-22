@@ -548,6 +548,30 @@ public final class PhotoController: ObservableObject {
         }
     }
 
+    /// Moves a single image from one gallery to another on the device.
+    /// There's no move endpoint, so this downloads the original bytes,
+    /// uploads them unchanged to the destination gallery under the same
+    /// filename, and only then deletes the original — a failed upload
+    /// leaves the source photo exactly where it was rather than losing it.
+    @discardableResult
+    public func moveDeviceImage(filename: String, from sourceGallery: String, to destinationGallery: String) async -> Bool {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let data = try await withWakeRetry {
+                try await client.fetchImageData(ip: settings.deviceIP, path: "/gallerys/\(sourceGallery)/\(filename)")
+            }
+            await client.ensureGallery(ip: settings.deviceIP, name: destinationGallery)
+            _ = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: destinationGallery, imageData: data, showNow: false)
+            try await client.deleteImage(ip: settings.deviceIP, filename: filename, gallery: sourceGallery)
+            statusText = "✓ Moved \(filename) to '\(destinationGallery)'"
+            return true
+        } catch {
+            statusText = "✗ Couldn't move \(filename): \(error.localizedDescription)"
+            return false
+        }
+    }
+
     public func showRandomPhoto() async {
         let galleriesToUse = settings.selectedGalleries.intersection(availableGalleryNames)
         guard !galleriesToUse.isEmpty else {
