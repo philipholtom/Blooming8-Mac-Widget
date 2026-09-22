@@ -457,8 +457,13 @@ private struct LibraryCell: View {
             .frame(height: size)
             .clipped()
             .overlay(
+                // Selection (blue) takes priority when both apply — a
+                // green ring alone was easy to miss entirely: an 8pt corner
+                // badge on a small thumbnail among dozens of others. A full
+                // border around the cell is visible at a glance without
+                // having to already know where to look.
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(isSelected ? Color.accentColor : .clear, lineWidth: 3)
+                    .stroke(isSelected ? Color.accentColor : (isCurrentOnFrame ? Color.green : .clear), lineWidth: 3)
             )
 
             Text(item.name)

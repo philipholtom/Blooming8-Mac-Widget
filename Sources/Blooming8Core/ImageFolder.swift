@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import CryptoKit
 
 /// Recursive image-file discovery on the local disk, shared by the widget's
 /// random picker and the app's folder browser.
@@ -103,12 +104,36 @@ public actor DeviceThumbnailStore {
     private var activeCount = 0
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
+    /// Backs the in-memory cache with a disk cache under this Mac's own
+    /// Caches directory, so a gallery browsed in an earlier app launch still
+    /// shows thumbnails instantly instead of re-fetching every full-size
+    /// JPEG from the frame's slow embedded HTTP server again. The in-memory
+    /// `cache` above is cleared on quit; this survives it.
+    private static let diskCacheDirectory: URL = {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("com.pholtom.blooming8/DeviceThumbnails", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
+    /// Evicts oldest files once the cache exceeds this size, rather than
+    /// growing unbounded across a large library browsed over many sessions.
+    private static let maxDiskCacheBytes = 200 * 1024 * 1024
+
     public init() {}
 
     public func thumbnail(ip: String, path: String, maxPixelSize: Int = 320) async -> NSImage? {
         let key = "\(ip)#\(path)#\(maxPixelSize)"
         if let cached = cache.object(forKey: key as NSString) { return cached }
         if let existing = inFlight[key] { return await existing.value }
+        let diskURL = Self.diskCacheURL(for: key)
+        if let diskData = try? Data(contentsOf: diskURL),
+           let cgImage = loadUprightCGImage(data: diskData, maxPixelSize: maxPixelSize) {
+            let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+            cache.setObject(image, forKey: key as NSString)
+            return image
+        }
 
         let task = Task<NSImage?, Never> { [client] in
             await self.acquireSlot()
@@ -116,7 +141,12 @@ public actor DeviceThumbnailStore {
                 guard let data = try? await client.fetchImageData(ip: ip, path: path),
                       let cgImage = loadUprightCGImage(data: data, maxPixelSize: maxPixelSize)
                 else { return nil }
-                return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+                let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+                if let thumbnailData = ImageCanvas.jpegData(image, quality: 0.8) {
+                    try? thumbnailData.write(to: diskURL)
+                    Self.evictOldestIfOverBudget()
+                }
+                return image
             }()
             await self.releaseSlot()
             return image
@@ -130,6 +160,47 @@ public actor DeviceThumbnailStore {
 
     public func clear() {
         cache.removeAllObjects()
+        if let files = try? FileManager.default.contentsOfDirectory(at: Self.diskCacheDirectory, includingPropertiesForKeys: nil) {
+            for file in files { try? FileManager.default.removeItem(at: file) }
+        }
+    }
+
+    /// The current total size of the on-disk thumbnail cache, for display
+    /// next to the "Clear" button in Settings.
+    public static func diskCacheSizeBytes() -> Int {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: diskCacheDirectory, includingPropertiesForKeys: [.fileSizeKey]
+        ) else { return 0 }
+        return files.reduce(0) { total, url in
+            total + ((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+        }
+    }
+
+    private static func diskCacheURL(for key: String) -> URL {
+        let hash = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        return diskCacheDirectory.appendingPathComponent("\(hash).jpg")
+    }
+
+    /// Deletes oldest-modified files first until the cache is back under
+    /// budget. Runs after every new write rather than on a timer — thumbnail
+    /// writes are infrequent enough (one per newly-seen photo, capped at
+    /// `maxConcurrent` in flight) that scanning the directory each time costs
+    /// nothing noticeable in practice.
+    private static func evictOldestIfOverBudget() {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: diskCacheDirectory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]
+        ) else { return }
+        let entries = files.map { url -> (url: URL, size: Int, date: Date) in
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            return (url, values?.fileSize ?? 0, values?.contentModificationDate ?? .distantPast)
+        }
+        var total = entries.reduce(0) { $0 + $1.size }
+        guard total > maxDiskCacheBytes else { return }
+        for entry in entries.sorted(by: { $0.date < $1.date }) {
+            guard total > maxDiskCacheBytes else { break }
+            try? FileManager.default.removeItem(at: entry.url)
+            total -= entry.size
+        }
     }
 
     private func acquireSlot() async {

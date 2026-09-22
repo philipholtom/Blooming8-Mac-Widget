@@ -10,6 +10,7 @@ struct CurrentPhotoPane: View {
 
     @State private var slideshowGallery = ""
     @State private var slideshowMinutes = "5"
+    @State private var showLocalFolderPicker = false
 
     var body: some View {
         ScrollView {
@@ -95,7 +96,7 @@ struct CurrentPhotoPane: View {
                     .disabled(controller.isBusy)
 
                     Button {
-                        Task { await controller.randomFromLocalFolder() }
+                        showLocalFolderPicker = true
                     } label: {
                         Label("Random from Local Folder", systemImage: "folder")
                     }
@@ -160,6 +161,9 @@ struct CurrentPhotoPane: View {
         }
         .onChange(of: controller.galleries) { names in
             if slideshowGallery.isEmpty { slideshowGallery = names.first ?? "" }
+        }
+        .sheet(isPresented: $showLocalFolderPicker) {
+            LocalFolderCandidatePickerSheet(controller: controller)
         }
     }
 

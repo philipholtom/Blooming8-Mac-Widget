@@ -31,6 +31,7 @@ struct SettingsSheet: View {
     @State private var showConnectCanvas = false
     @State private var einkshotTokenDraft = ""
     @State private var showScheduledSendPhotoPicker = false
+    @State private var thumbnailCacheSizeBytes = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -74,6 +75,23 @@ struct SettingsSheet: View {
                 Section("Photos") {
                     Toggle("Crop landscape photos to fill the frame", isOn: $settings.cropLandscapePhotos)
                     Text("Off: a landscape photo shows in full, with black bars above and below. On: it's cropped and centered to fill the whole screen instead. Portrait photos aren't affected.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Text("Thumbnail cache")
+                        Spacer()
+                        Text(thumbnailCacheSizeText)
+                            .foregroundStyle(.secondary)
+                        Button("Clear") {
+                            Task {
+                                await DeviceThumbnailStore.shared.clear()
+                                refreshThumbnailCacheSize()
+                            }
+                        }
+                        .disabled(thumbnailCacheSizeBytes == 0)
+                    }
+                    Text("Gallery thumbnails already downloaded from the frame are kept on disk so browsing a gallery you've visited before doesn't re-fetch every photo. Clearing this just frees the space — nothing is deleted from the frame.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -220,6 +238,7 @@ struct SettingsSheet: View {
             weatherLatitudeDraft = String(settings.weatherLatitude)
             weatherLongitudeDraft = String(settings.weatherLongitude)
             historyHighlightYearDraft = String(settings.historyHighlightYear)
+            refreshThumbnailCacheSize()
         }
     }
 
@@ -503,6 +522,14 @@ struct SettingsSheet: View {
         weatherLongitudeDraft = String(result.longitude)
         locationResults = []
         locationLookupError = nil
+    }
+
+    private var thumbnailCacheSizeText: String {
+        ByteCountFormatter.string(fromByteCount: Int64(thumbnailCacheSizeBytes), countStyle: .file)
+    }
+
+    private func refreshThumbnailCacheSize() {
+        thumbnailCacheSizeBytes = DeviceThumbnailStore.diskCacheSizeBytes()
     }
 
     private func saveEinkshotToken() {

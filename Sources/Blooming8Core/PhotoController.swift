@@ -332,6 +332,18 @@ public final class PhotoController: ObservableObject {
     private func applyDeviceInfo(_ info: DeviceInfo) {
         deviceName = info.name
         currentGalleryOnDevice = info.gallery
+        // Updates the path only, not previewImage/currentImageData — this
+        // runs on every 60-second status poll (pollDeviceStatus), not just
+        // explicit refresh/send actions, so the "On Frame" highlight in the
+        // gallery grid stays accurate even when the display changed for a
+        // reason this app process wasn't involved in (the menu bar widget's
+        // own auto-random, someone using the widget directly, the frame's
+        // own on-device slideshow advancing). Re-fetching the actual image
+        // bytes that often would be wasteful, so the big preview thumbnail
+        // still only updates on an explicit refresh/send here.
+        if let path = info.image, !path.isEmpty {
+            setCurrentImagePath(path)
+        }
         batteryPercent = info.battery
         sleepDurationSeconds = info.sleepDuration
         maxIdleSeconds = info.maxIdle
