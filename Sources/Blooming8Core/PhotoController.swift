@@ -58,22 +58,33 @@ public final class PhotoController: ObservableObject {
 
     public init(settings: AppSettings) {
         self.settings = settings
-        // Re-evaluate the schedule whenever any relevant setting changes, and
-        // once immediately (Combine's sink fires with the current value right
-        // after subscribing) so the schedule is live from app launch.
-        autoRandomCancellable = Publishers.CombineLatest4(
-            settings.$autoRandomEnabled,
-            settings.$autoRandomInterval,
-            settings.$autoRandomDailyMinute,
-            settings.$deviceIP
-        )
-        .sink { [weak self] _, _, _, _ in
-            self?.updateAutoRandomSchedule()
-        }
+        // Re-evaluate the schedule whenever any relevant setting changes —
+        // including switching the active frame profile entirely, since
+        // autoRandomEnabled/Interval/DailyMinute and deviceIP are now
+        // per-profile — and once immediately (Combine's sink fires with the
+        // current value right after subscribing) so the schedule is live
+        // from app launch.
+        //
+        // Subscribes to `$frameProfiles`/`$activeFrameProfileID` (the only
+        // genuinely `@Published` storage backing these per-frame values now)
+        // rather than the individual settings, and defers the actual re-read
+        // to the next run loop turn: `@Published` publishes from `willSet`,
+        // before the backing storage is actually updated, so a synchronous
+        // `settings.autoRandomEnabled` read inside this sink would see the
+        // value from BEFORE whatever change just triggered it — the same
+        // class of bug already found and fixed in ScheduledSendManager.
+        autoRandomCancellable = Publishers.CombineLatest(settings.$frameProfiles, settings.$activeFrameProfileID)
+            .sink { [weak self] _, _ in
+                Task { @MainActor [weak self] in
+                    self?.updateAutoRandomSchedule()
+                }
+            }
 
-        statusPollCancellable = settings.$deviceIP
-            .sink { [weak self] _ in
-                self?.updateStatusPollSchedule()
+        statusPollCancellable = Publishers.CombineLatest(settings.$frameProfiles, settings.$activeFrameProfileID)
+            .sink { [weak self] _, _ in
+                Task { @MainActor [weak self] in
+                    self?.updateStatusPollSchedule()
+                }
             }
     }
 
@@ -221,14 +232,14 @@ public final class PhotoController: ObservableObject {
             for (index, url) in urls.enumerated() {
                 statusText = "Uploading \(url.lastPathComponent) (\(index + 1)/\(urls.count))..."
                 guard let cgImage = loadUprightCGImage(at: url),
-                      let framed = renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: settings.cropLandscapePhotos),
+                      let framed = renderForFrame(cgImage: cgImage, width: settings.renderWidth, height: settings.renderHeight, cropLandscapePhotos: settings.cropLandscapePhotos),
                       let jpeg = ImageCanvas.jpegData(framed)
                 else {
                     failed += 1
                     continue
                 }
                 let baseName = sanitizeFilenameComponent(url.deletingPathExtension().lastPathComponent)
-                let filename = portraitFilename("\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(index)")
+                let filename = orientedFilename("\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(index)")
                 do {
                     _ = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: trimmedGallery, imageData: jpeg, showNow: false)
                     uploaded += 1
@@ -349,6 +360,17 @@ public final class PhotoController: ObservableObject {
         maxIdleSeconds = info.maxIdle
         wakeSensitivity = info.idxWakeSens
         isDeviceAwake = true
+        // Keeps rendering sized to whatever frame is actually connected —
+        // persisted on `settings` (not just here) so a reasonable size is
+        // already known before the first fetch of a future session. Guarded
+        // by a change check: this runs on every 60-second status poll, and
+        // frameWidth/frameHeight now live inside the active `FrameProfile`,
+        // so an unconditional write here would re-encode and persist the
+        // *entire* profile (tabs, favorites, everything) every single poll
+        // even though a panel's resolution never actually changes at
+        // runtime — wasteful for no benefit.
+        if let width = info.width, width > 0, width != settings.frameWidth { settings.frameWidth = width }
+        if let height = info.height, height > 0, height != settings.frameHeight { settings.frameHeight = height }
     }
 
     /// Sets `currentImagePath`, clearing `currentLocalSourceURL` unless
@@ -668,7 +690,7 @@ public final class PhotoController: ObservableObject {
             let imageData = try await source.generateImage(settings: settings)
 
             await client.ensureGallery(ip: settings.deviceIP, name: source.galleryName)
-            let filename = portraitFilename("\(source.id)_\(Int(Date().timeIntervalSince1970))")
+            let filename = orientedFilename("\(source.id)_\(Int(Date().timeIntervalSince1970))")
             let path = try await client.uploadImage(
                 ip: settings.deviceIP,
                 filename: filename,
@@ -694,11 +716,14 @@ public final class PhotoController: ObservableObject {
     /// The frame's firmware requires uploaded filenames to end with `_P.jpg`
     /// (portrait) or `_L.jpg` (landscape — the device rotates the stored
     /// pixels 90° at display time); a missing suffix corrupts the display
-    /// (see Schedule_Pull_API.md §5.3). Every image this app uploads is
-    /// always rendered onto a portrait canvas already (1200x1600, or via
-    /// renderLetterboxed), so this always appends `_P`.
-    private func portraitFilename(_ base: String) -> String {
-        "\(base)_P.jpg"
+    /// (see Schedule_Pull_API.md §5.3). Matches `settings.frameOrientation`,
+    /// which is also what decided the canvas this image was actually
+    /// rendered onto (`settings.renderWidth`/`renderHeight`) — the two have
+    /// to agree, or the frame rotates pixels that were never composed for
+    /// rotation.
+    private func orientedFilename(_ base: String) -> String {
+        let suffix = settings.frameOrientation == .landscape ? "L" : "P"
+        return "\(base)_\(suffix).jpg"
     }
 
     /// Strips anything that isn't a plain ASCII letter/digit/underscore/
@@ -775,6 +800,8 @@ public final class PhotoController: ObservableObject {
             return
         }
         let cropLandscapePhotos = settings.cropLandscapePhotos
+        let renderWidth = settings.renderWidth
+        let renderHeight = settings.renderHeight
 
         Task.detached(priority: .userInitiated) { [weak self] in
             var candidates: [LocalFolderCandidate] = []
@@ -782,7 +809,7 @@ public final class PhotoController: ObservableObject {
 
             for chosen in chosenURLs {
                 guard let cgImage = loadUprightCGImage(at: chosen),
-                      let framed = self?.renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: cropLandscapePhotos),
+                      let framed = self?.renderForFrame(cgImage: cgImage, width: renderWidth, height: renderHeight, cropLandscapePhotos: cropLandscapePhotos),
                       let jpeg = ImageCanvas.jpegData(framed)
                 else {
                     continue
@@ -933,7 +960,7 @@ public final class PhotoController: ObservableObject {
     /// Loads and prepares a specific image from a file path for display/upload.
     public func prepareBrowsedImage(url: URL) {
         guard let cgImage = loadUprightCGImage(at: url),
-              let framed = renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: settings.cropLandscapePhotos),
+              let framed = renderForFrame(cgImage: cgImage, width: settings.renderWidth, height: settings.renderHeight, cropLandscapePhotos: settings.cropLandscapePhotos),
               let jpeg = ImageCanvas.jpegData(framed)
         else {
             statusText = "Couldn't read '\(url.lastPathComponent)'."
@@ -948,7 +975,7 @@ public final class PhotoController: ObservableObject {
     /// disk — `sourceURL` is kept only for display/reveal-in-Finder, the
     /// frame itself comes from `cgImage`, not from re-reading that file.
     public func prepareVideoFrame(cgImage: CGImage, sourceURL: URL) {
-        guard let framed = renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: settings.cropLandscapePhotos),
+        guard let framed = renderForFrame(cgImage: cgImage, width: settings.renderWidth, height: settings.renderHeight, cropLandscapePhotos: settings.cropLandscapePhotos),
               let jpeg = ImageCanvas.jpegData(framed)
         else {
             statusText = "Couldn't process that frame."
@@ -967,7 +994,7 @@ public final class PhotoController: ObservableObject {
     /// colons, or spaces in a filename.
     public func preparePhotosLibraryImage(data: Data, displayName: String) {
         guard let cgImage = loadUprightCGImage(data: data),
-              let framed = renderForFrame(cgImage: cgImage, width: 1200, height: 1600, cropLandscapePhotos: settings.cropLandscapePhotos),
+              let framed = renderForFrame(cgImage: cgImage, width: settings.renderWidth, height: settings.renderHeight, cropLandscapePhotos: settings.cropLandscapePhotos),
               let jpeg = ImageCanvas.jpegData(framed)
         else {
             statusText = "Couldn't process that photo."
@@ -996,7 +1023,7 @@ public final class PhotoController: ObservableObject {
 
             let sourceBase = sanitizeFilenameComponent(candidate.fileURL.deletingPathExtension().lastPathComponent)
             let timestamp = Int(Date().timeIntervalSince1970)
-            let filename = portraitFilename("\(sourceBase)_\(timestamp)")
+            let filename = orientedFilename("\(sourceBase)_\(timestamp)")
             let fileSizeKB = Int(candidate.jpegData.count / 1024)
 
             // Retry upload up to 3 times if it fails

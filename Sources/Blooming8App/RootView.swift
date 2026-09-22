@@ -161,6 +161,25 @@ struct RootView: View {
                 ProgressView().controlSize(.small)
             }
 
+            if settings.frameProfiles.count > 1 {
+                Menu {
+                    ForEach(settings.frameProfiles) { profile in
+                        Button {
+                            switchToFrameProfile(profile.id)
+                        } label: {
+                            if profile.id == settings.activeFrameProfileID {
+                                Label(profile.name, systemImage: "checkmark")
+                            } else {
+                                Text(profile.name)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(activeFrameProfileName, systemImage: "photo.on.rectangle.angled")
+                }
+                .help("Switch which frame this app is controlling")
+            }
+
             Button {
                 Task { await controller.refreshCurrentPhoto() }
             } label: {
@@ -218,6 +237,25 @@ struct RootView: View {
             } label: {
                 Label("Settings", systemImage: "gearshape")
             }
+        }
+    }
+
+    private var activeFrameProfileName: String {
+        settings.frameProfiles.first(where: { $0.id == settings.activeFrameProfileID })?.name ?? "Frame"
+    }
+
+    /// Switching which profile is active moves every per-frame field
+    /// (`deviceIP`, `tabs`, `galleries`, etc.) onto a different physical
+    /// frame — re-fetches its state the same way app launch does, since
+    /// `controller`'s cached state still reflects whichever frame was
+    /// queried last, and drops back to the "On the Frame" pane rather than
+    /// leaving a gallery browse open that may not even exist on the new frame.
+    private func switchToFrameProfile(_ id: UUID) {
+        settings.activeFrameProfileID = id
+        source = .currentPhoto
+        Task {
+            await controller.refreshCurrentPhoto()
+            await controller.loadGalleries()
         }
     }
 

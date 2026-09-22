@@ -26,16 +26,23 @@ final class ScheduledSendManager: ObservableObject {
         // Combine's sink fires once immediately with the current value, so
         // the schedule is live from launch without a separate initial call.
         //
-        // Deliberately uses the value the publisher hands the closure, not a
-        // fresh `settings.scheduledSend` read: `@Published` publishes from
+        // `scheduledSend` is now a computed proxy into the active frame
+        // profile (see `AppSettings`), not its own `@Published` property, so
+        // this subscribes to `$frameProfiles`/`$activeFrameProfileID` — the
+        // genuinely `@Published` storage backing it — and pulls
+        // `scheduledSend` out of the DELIVERED profiles/activeID rather than
+        // re-reading `settings.scheduledSend`. `@Published` publishes from
         // `willSet`, before the property's backing storage is actually
-        // updated, so reading `settings.scheduledSend` synchronously inside
-        // this sink returns the PREVIOUS value — every edit rescheduled
-        // against the edit before it, one step behind. That's what produced
-        // the observed bug: setting the time to 13:45 left the next-fire
-        // caption (and the real timer) still targeting 13:44.
-        cancellable = settings.$scheduledSend
-            .sink { [weak self] newValue in self?.reschedule(with: newValue) }
+        // updated, so a fresh read here would return the PREVIOUS value —
+        // every edit rescheduled against the edit before it, one step
+        // behind. That's what produced the originally observed bug: setting
+        // the time to 13:45 left the next-fire caption (and the real timer)
+        // still targeting 13:44.
+        cancellable = Publishers.CombineLatest(settings.$frameProfiles, settings.$activeFrameProfileID)
+            .sink { [weak self] profiles, activeID in
+                let schedule = profiles.first(where: { $0.id == activeID })?.scheduledSend
+                self?.reschedule(with: schedule)
+            }
     }
 
     private func reschedule(with schedule: ScheduledSend?) {

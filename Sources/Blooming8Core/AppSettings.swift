@@ -16,7 +16,7 @@ public enum RandomWeighting: String, CaseIterable, Identifiable {
     }
 }
 
-public enum AutoRandomInterval: String, CaseIterable, Identifiable {
+public enum AutoRandomInterval: String, Codable, CaseIterable, Identifiable {
     case hourly
     case daily
 
@@ -26,6 +26,27 @@ public enum AutoRandomInterval: String, CaseIterable, Identifiable {
         switch self {
         case .hourly: return "Every Hour"
         case .daily: return "Daily"
+        }
+    }
+}
+
+/// How this specific frame is physically mounted — not discoverable from
+/// `/deviceInfo`, which always reports the same native panel resolution
+/// (e.g. 1200x1600) regardless of orientation. The frame's own firmware
+/// instead rotates whatever's uploaded 90° at display time based on the
+/// uploaded filename's `_P`/`_L` suffix (see `AppSettings.renderWidth`/
+/// `renderHeight` and `PhotoController.orientedFilename`), so this has to
+/// be a setting the user tells the app, per frame.
+public enum FrameOrientation: String, Codable, CaseIterable, Identifiable {
+    case portrait
+    case landscape
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .portrait: return "Portrait"
+        case .landscape: return "Landscape"
         }
     }
 }
@@ -52,25 +73,128 @@ public final class AppSettings: ObservableObject {
 
     private let defaults: UserDefaults
 
-    @Published public var deviceIP: String {
-        didSet { defaults.set(deviceIP, forKey: "deviceIP") }
-    }
-    @Published public var selectedGalleries: Set<String> {
-        didSet { defaults.set(Array(selectedGalleries), forKey: "selectedGalleries") }
-    }
-    @Published public var randomWeighting: RandomWeighting {
-        didSet { defaults.set(randomWeighting.rawValue, forKey: "randomWeighting") }
-    }
-    @Published public var bleDeviceName: String {
-        didSet { defaults.set(bleDeviceName, forKey: "bleDeviceName") }
-    }
-    @Published public var tabs: [GalleryTab] {
+    // MARK: - Frame profiles
+
+    /// Every frame this app knows about. Always has at least one entry —
+    /// enforced at init (migrating pre-multi-frame settings into a single
+    /// profile if none exist yet) and on delete (refusing to remove the
+    /// last one).
+    @Published public var frameProfiles: [FrameProfile] {
         didSet {
-            // Password hashes live in Keychain, not in this JSON blob (see
-            // GalleryTab's custom Codable) — keep Keychain in sync here,
-            // in the one place tabs actually change, rather than scattering
-            // writes across every call site that mutates a tab's password.
-            for tab in tabs {
+            if let data = try? JSONEncoder().encode(frameProfiles) {
+                defaults.set(data, forKey: "frameProfiles")
+            }
+        }
+    }
+
+    /// Which profile every per-frame property below reads and writes
+    /// through. Falls back to the first profile if it ever points at one
+    /// that no longer exists (e.g. right after that profile was deleted).
+    @Published public var activeFrameProfileID: UUID {
+        didSet { defaults.set(activeFrameProfileID.uuidString, forKey: "activeFrameProfileID") }
+    }
+
+    private var activeProfileIndex: Int {
+        frameProfiles.firstIndex(where: { $0.id == activeFrameProfileID }) ?? 0
+    }
+
+    private var activeProfile: FrameProfile {
+        frameProfiles.indices.contains(activeProfileIndex) ? frameProfiles[activeProfileIndex] : FrameProfile()
+    }
+
+    private func mutateActiveProfile(_ transform: (inout FrameProfile) -> Void) {
+        guard frameProfiles.indices.contains(activeProfileIndex) else { return }
+        var profile = frameProfiles[activeProfileIndex]
+        transform(&profile)
+        frameProfiles[activeProfileIndex] = profile
+    }
+
+    /// Adds a new, blank profile and switches to it immediately — a fresh
+    /// frame is more likely to be what you want to configure next than
+    /// stay looking at the one you just finished setting up.
+    public func addFrameProfile(name: String) {
+        let profile = FrameProfile(name: name)
+        frameProfiles.append(profile)
+        activeFrameProfileID = profile.id
+    }
+
+    /// Removes a profile (and its Keychain-held remote-push token). Refuses
+    /// to remove the last remaining profile — the app always needs
+    /// somewhere for its per-frame settings to live — and switches to the
+    /// first remaining profile if the active one was removed.
+    public func deleteFrameProfile(_ id: UUID) {
+        guard frameProfiles.count > 1, let index = frameProfiles.firstIndex(where: { $0.id == id }) else { return }
+        KeychainStore.delete(account: Self.einkshotTokenAccount(for: id))
+        for tab in frameProfiles[index].tabs {
+            KeychainStore.delete(account: GalleryTab.keychainAccount(for: tab.id))
+        }
+        frameProfiles.remove(at: index)
+        if activeFrameProfileID == id {
+            activeFrameProfileID = frameProfiles[0].id
+        }
+    }
+
+    public func renameFrameProfile(_ id: UUID, to newName: String) {
+        guard let index = frameProfiles.firstIndex(where: { $0.id == id }) else { return }
+        frameProfiles[index].name = newName
+    }
+
+    // MARK: - Per-frame properties (proxy into the active profile)
+
+    public var deviceIP: String {
+        get { activeProfile.deviceIP }
+        set { mutateActiveProfile { $0.deviceIP = newValue } }
+    }
+    /// The frame's native panel resolution, learned from `/deviceInfo`.
+    /// Confirmed directly against two physical frames, one mounted portrait
+    /// and one landscape: `/deviceInfo` reports the exact same width/height
+    /// on both (same panel hardware) — this is NOT orientation-aware, so use
+    /// `renderWidth`/`renderHeight` below for anything that actually renders
+    /// onto the frame's canvas.
+    public var frameWidth: Int {
+        get { activeProfile.frameWidth }
+        set { mutateActiveProfile { $0.frameWidth = newValue } }
+    }
+    public var frameHeight: Int {
+        get { activeProfile.frameHeight }
+        set { mutateActiveProfile { $0.frameHeight = newValue } }
+    }
+    /// How this specific frame is physically mounted — see
+    /// `FrameOrientation`'s own doc comment for why this can't be learned
+    /// from the device itself and has to be set here.
+    public var frameOrientation: FrameOrientation {
+        get { activeProfile.frameOrientation }
+        set { mutateActiveProfile { $0.frameOrientation = newValue } }
+    }
+
+    /// The canvas size to actually render onto — `frameWidth`/`frameHeight`
+    /// swapped when `frameOrientation` is `.landscape`, since the frame's
+    /// native panel is always the same physical shape (tall) regardless of
+    /// mounting; the device itself rotates whatever's uploaded with an `_L`
+    /// filename suffix 90° at display time (see
+    /// `PhotoController.orientedFilename`) rather than accepting
+    /// already-rotated pixel dimensions.
+    public var renderWidth: Int { frameOrientation == .landscape ? frameHeight : frameWidth }
+    public var renderHeight: Int { frameOrientation == .landscape ? frameWidth : frameHeight }
+
+    public var selectedGalleries: Set<String> {
+        get { activeProfile.selectedGalleries }
+        set { mutateActiveProfile { $0.selectedGalleries = newValue } }
+    }
+
+    public var bleDeviceName: String {
+        get { activeProfile.bleDeviceName }
+        set { mutateActiveProfile { $0.bleDeviceName = newValue } }
+    }
+
+    public var tabs: [GalleryTab] {
+        get { activeProfile.tabs }
+        set {
+            // Password hashes live in Keychain, not this profile's JSON —
+            // keep Keychain in sync here, in the one place tabs actually
+            // change, rather than scattering writes across every call site
+            // that mutates a tab's password.
+            for tab in newValue {
                 let account = GalleryTab.keychainAccount(for: tab.id)
                 if let hash = tab.passwordHash {
                     KeychainStore.write(hash, account: account)
@@ -78,34 +202,90 @@ public final class AppSettings: ObservableObject {
                     KeychainStore.delete(account: account)
                 }
             }
-            // A tab that existed in oldValue but not anymore (deleted) would
+            // A tab that existed before but not anymore (deleted) would
             // otherwise leave its Keychain entry orphaned forever.
-            let currentIDs = Set(tabs.map(\.id))
-            for removed in oldValue where !currentIDs.contains(removed.id) {
+            let currentIDs = Set(newValue.map(\.id))
+            for removed in activeProfile.tabs where !currentIDs.contains(removed.id) {
                 KeychainStore.delete(account: GalleryTab.keychainAccount(for: removed.id))
             }
-            if let data = try? JSONEncoder().encode(tabs) {
-                defaults.set(data, forKey: "galleryTabs")
-            }
+            mutateActiveProfile { $0.tabs = newValue }
         }
     }
-    @Published public var autoRandomEnabled: Bool {
-        didSet { defaults.set(autoRandomEnabled, forKey: "autoRandomEnabled") }
+
+    public var autoRandomEnabled: Bool {
+        get { activeProfile.autoRandomEnabled }
+        set { mutateActiveProfile { $0.autoRandomEnabled = newValue } }
     }
-    @Published public var autoRandomInterval: AutoRandomInterval {
-        didSet { defaults.set(autoRandomInterval.rawValue, forKey: "autoRandomInterval") }
+    public var autoRandomInterval: AutoRandomInterval {
+        get { activeProfile.autoRandomInterval }
+        set { mutateActiveProfile { $0.autoRandomInterval = newValue } }
     }
     /// Minutes since midnight (local time), only used when autoRandomInterval == .daily.
-    @Published public var autoRandomDailyMinute: Int {
-        didSet { defaults.set(autoRandomDailyMinute, forKey: "autoRandomDailyMinute") }
+    public var autoRandomDailyMinute: Int {
+        get { activeProfile.autoRandomDailyMinute }
+        set { mutateActiveProfile { $0.autoRandomDailyMinute = newValue } }
+    }
+
+    public var selectedContentSources: Set<String> {
+        get { activeProfile.selectedContentSources }
+        set { mutateActiveProfile { $0.selectedContentSources = newValue } }
+    }
+
+    /// When true, a landscape source photo is cropped and centered to fill
+    /// the frame's canvas instead of being letterboxed. Portrait and square
+    /// sources are unaffected either way — they don't have the "tiny photo
+    /// between two black bars" problem this exists to fix.
+    public var cropLandscapePhotos: Bool {
+        get { activeProfile.cropLandscapePhotos }
+        set { mutateActiveProfile { $0.cropLandscapePhotos = newValue } }
+    }
+
+    /// List of favorite image file paths marked by the user.
+    public var favoriteImagePaths: [String] {
+        get { activeProfile.favoriteImagePaths }
+        set { mutateActiveProfile { $0.favoriteImagePaths = newValue } }
+    }
+
+    /// One photo scheduled to send at a fixed time on chosen days — see
+    /// `ScheduledSend`.
+    public var scheduledSend: ScheduledSend? {
+        get { activeProfile.scheduledSend }
+        set { mutateActiveProfile { $0.scheduledSend = newValue } }
+    }
+
+    /// Bearer token for this frame's separate remote-push relay API
+    /// ("einkshot" — see `EinkshotClient`), for sending a photo over the
+    /// internet rather than the local network. Lives in Keychain, keyed by
+    /// the active profile's id — not part of `FrameProfile`'s own JSON, the
+    /// same reasoning as `GalleryTab.passwordHash`.
+    public var einkshotToken: String? {
+        get { KeychainStore.read(account: Self.einkshotTokenAccount(for: activeFrameProfileID)) }
+        set {
+            let account = Self.einkshotTokenAccount(for: activeFrameProfileID)
+            if let newValue, !newValue.trimmingCharacters(in: .whitespaces).isEmpty {
+                KeychainStore.write(newValue, account: account)
+            } else {
+                KeychainStore.delete(account: account)
+            }
+            // Doesn't go through `frameProfiles` (Keychain-backed, not
+            // JSON), so nothing else triggers a republish for SwiftUI here.
+            objectWillChange.send()
+        }
+    }
+
+    private static func einkshotTokenAccount(for profileID: UUID) -> String {
+        "einkshotDeviceToken.\(profileID.uuidString)"
+    }
+
+    // MARK: - Mac-wide properties (shared across every frame profile)
+
+    @Published public var randomWeighting: RandomWeighting {
+        didSet { defaults.set(randomWeighting.rawValue, forKey: "randomWeighting") }
     }
     /// NASA APOD API key. Defaults to NASA's public shared demo key (rate-limited);
     /// stored locally only, never committed to the repo.
     @Published public var nasaApiKey: String {
         didSet { defaults.set(nasaApiKey, forKey: "nasaApiKey") }
-    }
-    @Published public var selectedContentSources: Set<String> {
-        didSet { defaults.set(Array(selectedContentSources), forKey: "selectedContentSources") }
     }
     @Published public var weatherLocationName: String {
         didSet { defaults.set(weatherLocationName, forKey: "weatherLocationName") }
@@ -125,24 +305,14 @@ public final class AppSettings: ObservableObject {
     /// A folder on this Mac to pick random photos from for the "Local Folder"
     /// tab. Stored as a plain path — the app isn't sandboxed, so no
     /// security-scoped bookmark is needed to keep reading it after relaunch.
+    /// Mac-wide rather than per-frame: it's this Mac's own files, not
+    /// anything about a particular device.
     @Published public var randomFolderPath: String {
         didSet { defaults.set(randomFolderPath, forKey: "randomFolderPath") }
     }
 
-    /// When true, a landscape source photo is cropped and centered to fill
-    /// the frame's portrait canvas instead of being letterboxed. Portrait and
-    /// square sources are unaffected either way — they don't have the "tiny
-    /// photo between two black bars" problem this exists to fix.
-    @Published public var cropLandscapePhotos: Bool {
-        didSet { defaults.set(cropLandscapePhotos, forKey: "cropLandscapePhotos") }
-    }
-
-    /// List of favorite image file paths marked by the user.
-    @Published public var favoriteImagePaths: [String] {
-        didSet { defaults.set(favoriteImagePaths, forKey: "favoriteImagePaths") }
-    }
-
-    /// Whether the Local Folder tab is password protected.
+    /// Whether the Local Folder tab is password protected. Mac-wide for the
+    /// same reason as `randomFolderPath` above.
     @Published public var localFolderLocked: Bool {
         didSet { defaults.set(localFolderLocked, forKey: "localFolderLocked") }
     }
@@ -164,44 +334,12 @@ public final class AppSettings: ObservableObject {
 
     private static let localFolderPasswordAccount = "localFolderPasswordHash"
 
-    /// Bearer token for the frame's separate remote-push relay API
-    /// ("einkshot" — see `EinkshotClient`), for sending a photo over the
-    /// internet rather than the local network. Lives in Keychain under the
-    /// same service `KeychainStore` already uses for password hashes, and
-    /// the same account name a one-off `security add-generic-password` used
-    /// before this settings field existed — so a token set that way already
-    /// shows up here without needing to be re-entered.
-    @Published public var einkshotToken: String? {
-        didSet {
-            if let einkshotToken, !einkshotToken.trimmingCharacters(in: .whitespaces).isEmpty {
-                KeychainStore.write(einkshotToken, account: Self.einkshotTokenAccount)
-            } else {
-                KeychainStore.delete(account: Self.einkshotTokenAccount)
-            }
-        }
-    }
-
-    private static let einkshotTokenAccount = "einkshotDeviceToken"
-
     /// When true, unlock prompts (gallery tabs, Local Folder/Favorites) try
     /// Touch ID first and only fall back to the password field if it's
     /// unavailable or fails. The password stays the real secret either way —
     /// this only changes whether biometrics offer a faster path to it.
     @Published public var useTouchIDForLocks: Bool {
         didSet { defaults.set(useTouchIDForLocks, forKey: "useTouchIDForLocks") }
-    }
-
-    /// One photo scheduled to send at a fixed time on chosen days — see
-    /// `ScheduledSend`. Persisted as JSON, same pattern as `tabs`, since it's
-    /// a single struct rather than a UserDefaults-primitive value.
-    @Published public var scheduledSend: ScheduledSend? {
-        didSet {
-            if let scheduledSend, let data = try? JSONEncoder().encode(scheduledSend) {
-                defaults.set(data, forKey: "scheduledSend")
-            } else {
-                defaults.removeObject(forKey: "scheduledSend")
-            }
-        }
     }
 
     public convenience init() {
@@ -211,52 +349,66 @@ public final class AppSettings: ObservableObject {
     public init(defaults: UserDefaults) {
         self.defaults = defaults
         AppSettings.migrateLegacyDefaultsIfNeeded(into: defaults)
-        deviceIP = defaults.string(forKey: "deviceIP") ?? ""
-        if let stored = defaults.stringArray(forKey: "selectedGalleries") {
-            selectedGalleries = Set(stored)
-        } else if let legacy = defaults.string(forKey: "selectedGallery"), !legacy.isEmpty {
-            // Migrate from the old single-gallery setting.
-            selectedGalleries = [legacy]
+
+        // Built into local variables first, not assigned to `self` directly:
+        // `frameProfiles` has a `didSet`, and Swift won't allow reading a
+        // property with an observer back (`frameProfiles.contains`/`[0]`
+        // below) until every stored property has been given a value — the
+        // same restriction `tabs` used to hit before it moved into this
+        // struct. Assigning both `self.frameProfiles` and
+        // `self.activeFrameProfileID` once, at the end, from these locals
+        // sidesteps it entirely.
+        let resolvedProfiles: [FrameProfile]
+        if let data = defaults.data(forKey: "frameProfiles"),
+           let decoded = try? JSONDecoder().decode([FrameProfile].self, from: data),
+           !decoded.isEmpty {
+            resolvedProfiles = decoded
         } else {
-            selectedGalleries = []
+            // First run after multi-frame support shipped (or a fresh
+            // install): build one profile from whatever flat per-frame keys
+            // already exist under the old single-frame scheme, so an
+            // existing install doesn't come back up with a blank frame IP,
+            // no tabs and no schedule.
+            //
+            // The App and Widget are separate processes that each construct
+            // their own `AppSettings` independently — if both launch around
+            // the same moment, both can see no `frameProfiles` yet and both
+            // race to migrate. Using a fixed id here (rather than a fresh
+            // random `UUID()`) makes that harmless: both processes compute
+            // the same profile from the same underlying legacy keys, so
+            // whichever writes last leaves equivalent data either way,
+            // instead of one process's profile silently orphaning the
+            // other's — confirmed hitting this exact race directly (App and
+            // Widget launched together), which left `activeFrameProfileID`
+            // pointing at a profile that no longer existed. (Harmless in
+            // practice: `activeFrameProfileID`'s own resolution below falls
+            // back to the first profile when its stored id doesn't match,
+            // so this is defense in depth, not a fix for actual data loss.)
+            let profile = AppSettings.legacyProfile(from: defaults, id: Self.legacyProfileID)
+            resolvedProfiles = [profile]
+            if let legacyToken = KeychainStore.read(account: "einkshotDeviceToken") {
+                KeychainStore.write(legacyToken, account: Self.einkshotTokenAccount(for: profile.id))
+            }
         }
+
+        let resolvedActiveID: UUID
+        if let idString = defaults.string(forKey: "activeFrameProfileID"), let id = UUID(uuidString: idString),
+           resolvedProfiles.contains(where: { $0.id == id }) {
+            resolvedActiveID = id
+        } else {
+            resolvedActiveID = resolvedProfiles[0].id
+        }
+        frameProfiles = resolvedProfiles
+        activeFrameProfileID = resolvedActiveID
+
         if let raw = defaults.string(forKey: "randomWeighting"),
            let weighting = RandomWeighting(rawValue: raw) {
             randomWeighting = weighting
         } else {
             randomWeighting = .perPhoto
         }
-        // Defaults to "Office" — the BLE name your existing NASA APOD Frame
-        // script uses to wake this same frame (same IP, confirmed working).
-        bleDeviceName = defaults.string(forKey: "bleDeviceName") ?? "Office"
-
-        if let data = defaults.data(forKey: "galleryTabs"),
-           let decoded = try? JSONDecoder().decode([GalleryTab].self, from: data) {
-            tabs = decoded
-        } else {
-            tabs = []
-        }
-
-        autoRandomEnabled = defaults.bool(forKey: "autoRandomEnabled")
-        if let raw = defaults.string(forKey: "autoRandomInterval"),
-           let interval = AutoRandomInterval(rawValue: raw) {
-            autoRandomInterval = interval
-        } else {
-            autoRandomInterval = .hourly
-        }
-        if defaults.object(forKey: "autoRandomDailyMinute") != nil {
-            autoRandomDailyMinute = defaults.integer(forKey: "autoRandomDailyMinute")
-        } else {
-            autoRandomDailyMinute = 9 * 60 // 9:00 AM default
-        }
 
         nasaApiKey = defaults.string(forKey: "nasaApiKey") ?? "DEMO_KEY"
-        if let stored = defaults.stringArray(forKey: "selectedContentSources") {
-            selectedContentSources = Set(stored)
-        } else {
-            selectedContentSources = []
-        }
-
         weatherLocationName = defaults.string(forKey: "weatherLocationName") ?? ""
         weatherLatitude = defaults.object(forKey: "weatherLatitude") != nil
             ? defaults.double(forKey: "weatherLatitude") : 0
@@ -265,8 +417,6 @@ public final class AppSettings: ObservableObject {
         historyHighlightYear = defaults.object(forKey: "historyHighlightYear") != nil
             ? defaults.integer(forKey: "historyHighlightYear") : 1979
         randomFolderPath = defaults.string(forKey: "randomFolderPath") ?? ""
-        cropLandscapePhotos = defaults.bool(forKey: "cropLandscapePhotos")
-        favoriteImagePaths = defaults.stringArray(forKey: "favoriteImagePaths") ?? []
         localFolderLocked = defaults.bool(forKey: "localFolderLocked")
         if let fromKeychain = KeychainStore.read(account: Self.localFolderPasswordAccount) {
             Self.log.notice("localFolderPasswordHash: read from Keychain")
@@ -283,27 +433,68 @@ public final class AppSettings: ObservableObject {
             localFolderPasswordHash = nil
         }
         useTouchIDForLocks = defaults.bool(forKey: "useTouchIDForLocks")
-        einkshotToken = KeychainStore.read(account: Self.einkshotTokenAccount)
+
+        // `frameProfiles`'s own didSet does NOT fire for the assignment
+        // above: Swift skips property observers when a property is set
+        // inside its own initializer. Without this, a first-run migration
+        // (or a tab whose hash just migrated out of the decoded blob) would
+        // never actually get persisted until something unrelated touched
+        // `frameProfiles` again — possibly never. Redone here, now that
+        // every stored property (including `defaults` itself) is set and
+        // `self` can be used. Same reasoning `tabs` used to need before it
+        // moved inside `frameProfiles`.
+        if let data = try? JSONEncoder().encode(frameProfiles) {
+            defaults.set(data, forKey: "frameProfiles")
+        }
+        defaults.set(activeFrameProfileID.uuidString, forKey: "activeFrameProfileID")
+    }
+
+    /// Fixed id for the one profile created by migrating pre-multi-frame
+    /// settings — see the migration race comment where this is used.
+    private static let legacyProfileID = UUID(uuidString: "00000000-0000-4000-8000-000000000001")!
+
+    /// Builds one `FrameProfile` from the flat per-frame keys this app used
+    /// before multi-frame support existed, so upgrading doesn't lose an
+    /// existing configuration.
+    private static func legacyProfile(from defaults: UserDefaults, id: UUID) -> FrameProfile {
+        let deviceIP = defaults.string(forKey: "deviceIP") ?? ""
+        var profile = FrameProfile(name: deviceIP.isEmpty ? "My Frame" : deviceIP)
+        profile.id = id
+        profile.deviceIP = deviceIP
+        profile.bleDeviceName = defaults.string(forKey: "bleDeviceName") ?? "Office"
+        profile.frameWidth = defaults.object(forKey: "frameWidth") != nil ? defaults.integer(forKey: "frameWidth") : 1200
+        profile.frameHeight = defaults.object(forKey: "frameHeight") != nil ? defaults.integer(forKey: "frameHeight") : 1600
+        if let raw = defaults.string(forKey: "frameOrientation"), let orientation = FrameOrientation(rawValue: raw) {
+            profile.frameOrientation = orientation
+        }
+        if let stored = defaults.stringArray(forKey: "selectedGalleries") {
+            profile.selectedGalleries = Set(stored)
+        } else if let legacy = defaults.string(forKey: "selectedGallery"), !legacy.isEmpty {
+            // Migrate from the old single-gallery setting.
+            profile.selectedGalleries = [legacy]
+        }
+        if let data = defaults.data(forKey: "galleryTabs"),
+           let decoded = try? JSONDecoder().decode([GalleryTab].self, from: data) {
+            profile.tabs = decoded
+        }
+        profile.autoRandomEnabled = defaults.bool(forKey: "autoRandomEnabled")
+        if let raw = defaults.string(forKey: "autoRandomInterval"),
+           let interval = AutoRandomInterval(rawValue: raw) {
+            profile.autoRandomInterval = interval
+        }
+        if defaults.object(forKey: "autoRandomDailyMinute") != nil {
+            profile.autoRandomDailyMinute = defaults.integer(forKey: "autoRandomDailyMinute")
+        }
+        if let stored = defaults.stringArray(forKey: "selectedContentSources") {
+            profile.selectedContentSources = Set(stored)
+        }
+        profile.cropLandscapePhotos = defaults.bool(forKey: "cropLandscapePhotos")
+        profile.favoriteImagePaths = defaults.stringArray(forKey: "favoriteImagePaths") ?? []
         if let data = defaults.data(forKey: "scheduledSend"),
            let decoded = try? JSONDecoder().decode(ScheduledSend.self, from: data) {
-            scheduledSend = decoded
-        } else {
-            scheduledSend = nil
+            profile.scheduledSend = decoded
         }
-
-        // `tabs`'s own didSet (which re-encodes without passwordHash, now
-        // that it's migrated into Keychain during decode above — see
-        // GalleryTab.init(from:)) does NOT fire for the assignment above:
-        // Swift skips property observers when a property is set inside its
-        // own initializer. Without this, a tab whose hash just migrated
-        // out of the decoded blob would sit there completely unchanged,
-        // legacy hash and all, until something unrelated happened to
-        // touch `tabs` again — possibly never. Redone here, now that every
-        // stored property (including `defaults` and `tabs` itself) is set
-        // and `self` can be used.
-        if let data = try? JSONEncoder().encode(tabs) {
-            defaults.set(data, forKey: "galleryTabs")
-        }
+        return profile
     }
 
     /// The widget stored everything in the standard domain before the app

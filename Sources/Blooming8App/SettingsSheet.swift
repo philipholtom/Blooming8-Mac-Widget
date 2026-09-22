@@ -32,6 +32,8 @@ struct SettingsSheet: View {
     @State private var einkshotTokenDraft = ""
     @State private var showScheduledSendPhotoPicker = false
     @State private var thumbnailCacheSizeBytes = 0
+    @State private var newFrameProfileName = ""
+    @State private var pendingFrameProfileDeletion: FrameProfile?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -42,6 +44,10 @@ struct SettingsSheet: View {
                 .padding(.bottom, 12)
 
             Form {
+                Section("Frame Profiles") {
+                    frameProfilesSection
+                }
+
                 Section("Frame") {
                     TextField("IP address", text: $ipDraft, prompt: Text("192.168.1.42"))
                     HStack {
@@ -49,6 +55,15 @@ struct SettingsSheet: View {
                         Button("Scan\u{2026}") { showConnectCanvas = true }
                     }
                     Text("The Bluetooth name is used to wake the frame when it's asleep and stops answering over Wi-Fi.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Picker("Orientation", selection: $settings.frameOrientation) {
+                        ForEach(FrameOrientation.allCases) { orientation in
+                            Text(orientation.label).tag(orientation)
+                        }
+                    }
+                    Text("How this frame is physically mounted — the frame itself always reports the same panel size either way, so this can't be detected automatically. Everything sent to the frame is composed for this orientation.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -227,19 +242,104 @@ struct SettingsSheet: View {
             }
         }
         .onAppear {
-            ipDraft = settings.deviceIP
-            bleNameDraft = settings.bleDeviceName
+            syncFrameDraftsFromActiveProfile()
             nasaKeyDraft = settings.nasaApiKey
-            deviceNameDraft = controller.deviceName ?? ""
-            maxIdleMinutesDraft = controller.maxIdleSeconds.map { String($0 / 60) } ?? ""
-            sleepDurationHoursDraft = controller.sleepDurationSeconds.map { String($0 / 3600) } ?? ""
-            wakeSensitivityDraft = controller.wakeSensitivity.map(String.init) ?? ""
             weatherLocationNameDraft = settings.weatherLocationName
             weatherLatitudeDraft = String(settings.weatherLatitude)
             weatherLongitudeDraft = String(settings.weatherLongitude)
             historyHighlightYearDraft = String(settings.historyHighlightYear)
             refreshThumbnailCacheSize()
         }
+    }
+
+    // MARK: - Frame profiles
+
+    @ViewBuilder
+    private var frameProfilesSection: some View {
+        Text("Each profile remembers its own IP address, orientation, galleries, tabs, favorites, and schedules — everything below in \"Frame\" and further down applies to whichever one is active.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        ForEach(settings.frameProfiles) { profile in
+            HStack {
+                TextField("Name", text: frameProfileNameBinding(profile.id))
+                    .textFieldStyle(.plain)
+                if profile.id == settings.activeFrameProfileID {
+                    Text("Active")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button("Switch") { switchToFrameProfile(profile.id) }
+                }
+                Button(role: .destructive) {
+                    pendingFrameProfileDeletion = profile
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .disabled(settings.frameProfiles.count <= 1)
+                .help(settings.frameProfiles.count <= 1 ? "At least one frame profile is required" : "Delete this profile")
+            }
+        }
+
+        HStack {
+            TextField("New profile name", text: $newFrameProfileName)
+            Button("Add Profile") {
+                let trimmed = newFrameProfileName.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else { return }
+                settings.addFrameProfile(name: trimmed)
+                newFrameProfileName = ""
+                switchToFrameProfile(settings.activeFrameProfileID)
+            }
+            .disabled(newFrameProfileName.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .alert(
+            "Delete '\(pendingFrameProfileDeletion?.name ?? "")'?",
+            isPresented: Binding(get: { pendingFrameProfileDeletion != nil }, set: { if !$0 { pendingFrameProfileDeletion = nil } })
+        ) {
+            Button("Cancel", role: .cancel) { pendingFrameProfileDeletion = nil }
+            Button("Delete", role: .destructive) {
+                guard let profile = pendingFrameProfileDeletion else { return }
+                let wasActive = profile.id == settings.activeFrameProfileID
+                settings.deleteFrameProfile(profile.id)
+                pendingFrameProfileDeletion = nil
+                if wasActive { switchToFrameProfile(settings.activeFrameProfileID) }
+            }
+        } message: {
+            Text("This removes its saved IP address, tabs, favorites, and schedule from this app. It doesn't change anything on the frame itself.")
+        }
+    }
+
+    private func frameProfileNameBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: { settings.frameProfiles.first(where: { $0.id == id })?.name ?? "" },
+            set: { settings.renameFrameProfile(id, to: $0) }
+        )
+    }
+
+    /// Switching which profile is active moves every per-frame field
+    /// (`deviceIP`, `tabs`, etc.) to point at a different frame — this
+    /// sheet's own IP/Bluetooth-name drafts need to catch up immediately, or
+    /// hitting Save would write the field you're still looking at onto the
+    /// newly-active profile instead of the one it visually still shows.
+    /// Also re-fetches the newly active frame's own state (name, galleries)
+    /// the same way app launch does, since `controller`'s cached state still
+    /// reflects whichever frame was queried last.
+    private func switchToFrameProfile(_ id: UUID) {
+        settings.activeFrameProfileID = id
+        syncFrameDraftsFromActiveProfile()
+        Task {
+            await controller.refreshCurrentPhoto()
+            await controller.loadGalleries()
+        }
+    }
+
+    private func syncFrameDraftsFromActiveProfile() {
+        ipDraft = settings.deviceIP
+        bleNameDraft = settings.bleDeviceName
+        deviceNameDraft = controller.deviceName ?? ""
+        maxIdleMinutesDraft = controller.maxIdleSeconds.map { String($0 / 60) } ?? ""
+        sleepDurationHoursDraft = controller.sleepDurationSeconds.map { String($0 / 3600) } ?? ""
+        wakeSensitivityDraft = controller.wakeSensitivity.map(String.init) ?? ""
     }
 
     // MARK: - Device settings (pushed to the frame itself, not just local)

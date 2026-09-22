@@ -8,9 +8,14 @@ public struct DeviceInfo: Decodable {
     public let sleepDuration: Int?
     public let maxIdle: Int?
     public let idxWakeSens: Int?
+    /// The frame's actual canvas size in pixels (e.g. 1200x1600 for a
+    /// portrait model) — lets rendering adapt to whatever frame is
+    /// connected instead of assuming portrait 1200x1600 everywhere.
+    public let width: Int?
+    public let height: Int?
 
     public enum CodingKeys: String, CodingKey {
-        case name, image, gallery, battery
+        case name, image, gallery, battery, width, height
         case sleepDuration = "sleep_duration"
         case maxIdle = "max_idle"
         case idxWakeSens = "idx_wake_sens"

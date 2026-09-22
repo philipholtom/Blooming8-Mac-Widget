@@ -124,8 +124,16 @@ final class LibraryModel: ObservableObject {
     /// here instead of re-walking the device's (slow, paginated) `/gallery`
     /// listing endpoint every single click — that listing fetch, not image
     /// data, was the actual source of the "reloads every time" delay, since
-    /// DeviceThumbnailStore already caches the thumbnails themselves.
+    /// DeviceThumbnailStore already caches the thumbnails themselves. Keyed
+    /// by device IP + gallery name, not just gallery name — with multiple
+    /// frame profiles, two different frames can each have a same-named
+    /// gallery (e.g. both have a "Random"), and switching the active frame
+    /// shouldn't show one frame's cached listing under the other's name.
     private var galleryListingCache: [String: [String]] = [:]
+
+    private func galleryListingCacheKey(_ galleryName: String) -> String {
+        "\(settings.deviceIP)#\(galleryName)"
+    }
 
     init(settings: AppSettings, controller: PhotoController) {
         self.settings = settings
@@ -214,7 +222,7 @@ final class LibraryModel: ObservableObject {
         selectedIDs.remove(item.id)
         if selection == item.id { selection = nil }
         if let galleryName = item.galleryName {
-            galleryListingCache[galleryName]?.removeAll { $0 == item.name }
+            galleryListingCache[galleryListingCacheKey(galleryName)]?.removeAll { $0 == item.name }
         }
     }
 
@@ -282,7 +290,8 @@ final class LibraryModel: ObservableObject {
         // `items` again once it lands — so a gallery someone's added photos
         // to since your last visit still catches up, just without making
         // every single click wait on the device's slow listing endpoint.
-        if let cachedNames = galleryListingCache[name] {
+        let cacheKey = galleryListingCacheKey(name)
+        if let cachedNames = galleryListingCache[cacheKey] {
             items = cachedNames.map { LibraryItem(devicePath: "/gallerys/\(name)/\($0)", galleryName: name) }
             isLoading = false
             loadError = items.isEmpty ? "This gallery is empty." : nil
@@ -295,7 +304,7 @@ final class LibraryModel: ObservableObject {
             do {
                 let names = try await client.fetchAllImages(ip: settings.deviceIP, gallery: name)
                 guard !Task.isCancelled else { return }
-                galleryListingCache[name] = names
+                galleryListingCache[cacheKey] = names
                 items = names.map { LibraryItem(devicePath: "/gallerys/\(name)/\($0)", galleryName: name) }
                 isLoading = false
                 loadError = items.isEmpty ? "This gallery is empty." : nil
