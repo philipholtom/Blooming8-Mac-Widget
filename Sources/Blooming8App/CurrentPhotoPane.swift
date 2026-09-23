@@ -11,6 +11,7 @@ struct CurrentPhotoPane: View {
     @State private var slideshowGallery = ""
     @State private var slideshowMinutes = "5"
     @State private var showLocalFolderPicker = false
+    @State private var showRandomPhotoPicker = false
 
     var body: some View {
         ScrollView {
@@ -94,6 +95,15 @@ struct CurrentPhotoPane: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(controller.isBusy)
+                    .help("Shows a random photo immediately, no preview step")
+
+                    Button {
+                        showRandomPhotoPicker = true
+                    } label: {
+                        Label("Random 3", systemImage: "square.grid.3x1.below.line.grid.1x2")
+                    }
+                    .disabled(controller.isBusy)
+                    .help("Picks 3 random photos to choose from, with Next for 3 more")
 
                     Button {
                         showLocalFolderPicker = true
@@ -164,6 +174,9 @@ struct CurrentPhotoPane: View {
         }
         .sheet(isPresented: $showLocalFolderPicker) {
             LocalFolderCandidatePickerSheet(controller: controller)
+        }
+        .sheet(isPresented: $showRandomPhotoPicker) {
+            RandomPhotoPickerSheet(controller: controller)
         }
     }
 

@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.pholtom.blooming8widget</string>
     <key>CFBundleVersion</key>
-    <string>1.0</string>
+    <string>3</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>1.2</string>
     <key>CFBundleExecutable</key>
     <string>Blooming8Widget</string>
     <key>CFBundleIconFile</key>

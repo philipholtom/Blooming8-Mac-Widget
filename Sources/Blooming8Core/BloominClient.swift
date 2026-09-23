@@ -64,12 +64,35 @@ public enum BloominError: LocalizedError {
 
 public final class BloominClient {
     private let session: URLSession
+    /// A separate session just for `uploadImage`, with much more generous
+    /// timeouts than `session`'s. The frame's own device log showed
+    /// `Start upload: ...` immediately followed by `Upload aborted by
+    /// client` — this client, not the frame, was the one giving up: the
+    /// main session's 8s/15s timeouts are fine for a lightweight GET against
+    /// this frame's known-slow embedded server, but too short for actually
+    /// transferring an image (several hundred KB to ~1MB) to it, so a
+    /// perfectly healthy in-flight upload was being cancelled out from
+    /// under itself before the frame finished accepting it. Both
+    /// `timeoutIntervalForRequest` and `timeoutIntervalForResource` are
+    /// session-level configuration, not overridable per-request, hence a
+    /// second session rather than a per-request override.
+    private let uploadSession: URLSession
 
     public init() {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
         config.timeoutIntervalForResource = 15
         session = URLSession(configuration: config)
+
+        // Measured directly against the real frame: a 1.6MB JPEG upload
+        // (deliberately worst-case — high-entropy noise compresses poorly,
+        // larger than this app's own renders typically are) took 40s end to
+        // end. 90s/120s leaves real headroom above that rather than merely
+        // clearing the one measurement.
+        let uploadConfig = URLSessionConfiguration.ephemeral
+        uploadConfig.timeoutIntervalForRequest = 90
+        uploadConfig.timeoutIntervalForResource = 120
+        uploadSession = URLSession(configuration: uploadConfig)
     }
 
     private func baseURL(ip: String) throws -> String {
@@ -255,7 +278,7 @@ public final class BloominClient {
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         request.httpBody = body
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await uploadSession.data(for: request)
         try checkStatus(response)
         return try JSONDecoder().decode(UploadResponse.self, from: data).path
     }

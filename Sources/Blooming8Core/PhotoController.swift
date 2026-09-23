@@ -56,6 +56,13 @@ public final class PhotoController: ObservableObject {
     private var statusPollTimer: Timer?
     private var statusPollCancellable: AnyCancellable?
 
+    private struct AutoRandomTrigger: Equatable {
+        let enabled: Bool
+        let interval: AutoRandomInterval
+        let dailyMinute: Int
+        let deviceIP: String
+    }
+
     public init(settings: AppSettings) {
         self.settings = settings
         // Re-evaluate the schedule whenever any relevant setting changes —
@@ -67,21 +74,47 @@ public final class PhotoController: ObservableObject {
         //
         // Subscribes to `$frameProfiles`/`$activeFrameProfileID` (the only
         // genuinely `@Published` storage backing these per-frame values now)
-        // rather than the individual settings, and defers the actual re-read
-        // to the next run loop turn: `@Published` publishes from `willSet`,
-        // before the backing storage is actually updated, so a synchronous
-        // `settings.autoRandomEnabled` read inside this sink would see the
-        // value from BEFORE whatever change just triggered it — the same
-        // class of bug already found and fixed in ScheduledSendManager.
+        // rather than the individual settings, since those are computed
+        // proxies with no publisher of their own. But `frameProfiles` now
+        // backs EVERY per-frame setting, not just the ones these two timers
+        // care about — favorites, tabs, scheduledSend, galleries, dimensions,
+        // all of it — so subscribing to the raw array republished on every
+        // unrelated change and re-triggered `updateStatusPollSchedule()`
+        // (which fires an immediate extra `/deviceInfo` request) on every
+        // single settings write, not just an actual deviceIP/auto-random
+        // change. The frame's embedded HTTP server is already known to be
+        // slow and doesn't handle overlapping requests well, so this flooded
+        // it and surfaced as timeout errors during ordinary use — nothing to
+        // do with the frame itself. `.map` down to just the fields each
+        // timer actually depends on, then `.removeDuplicates()`, restores
+        // "only fires when something relevant actually changed."
+        //
+        // Deferred to the next run loop turn either way: `@Published`
+        // publishes from `willSet`, before the backing storage is actually
+        // updated, so a synchronous `settings.X` read inside this sink would
+        // see the value from BEFORE whatever change just triggered it — the
+        // same class of bug already found and fixed in ScheduledSendManager.
         autoRandomCancellable = Publishers.CombineLatest(settings.$frameProfiles, settings.$activeFrameProfileID)
-            .sink { [weak self] _, _ in
+            .map { profiles, activeID -> AutoRandomTrigger in
+                let profile = profiles.first(where: { $0.id == activeID })
+                return AutoRandomTrigger(
+                    enabled: profile?.autoRandomEnabled ?? false,
+                    interval: profile?.autoRandomInterval ?? .hourly,
+                    dailyMinute: profile?.autoRandomDailyMinute ?? 0,
+                    deviceIP: profile?.deviceIP ?? ""
+                )
+            }
+            .removeDuplicates()
+            .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.updateAutoRandomSchedule()
                 }
             }
 
         statusPollCancellable = Publishers.CombineLatest(settings.$frameProfiles, settings.$activeFrameProfileID)
-            .sink { [weak self] _, _ in
+            .map { profiles, activeID in profiles.first(where: { $0.id == activeID })?.deviceIP ?? "" }
+            .removeDuplicates()
+            .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.updateStatusPollSchedule()
                 }
@@ -555,11 +588,15 @@ public final class PhotoController: ObservableObject {
         defer { isBusy = false }
         do {
             try await withWakeRetry { try await client.show(ip: settings.deviceIP, imagePath: path) }
-            let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
-            previewImage = NSImage(data: data)
-            currentImageData = data
             setCurrentImagePath(path)
             statusText = "✓ Displayed \((path as NSString).lastPathComponent)"
+            // Best-effort, same reasoning as showRandomPhoto: the send
+            // itself already succeeded above, so a failed/slow thumbnail
+            // refresh shouldn't be reported as the whole action failing.
+            if let data = try? await client.fetchImageData(ip: settings.deviceIP, path: path) {
+                previewImage = NSImage(data: data)
+                currentImageData = data
+            }
         } catch {
             statusText = "✗ Couldn't display that image: \(error.localizedDescription)"
         }
@@ -658,16 +695,116 @@ public final class PhotoController: ObservableObject {
             }
 
             let path = "/gallerys/\(picked.gallery)/\(picked.name)"
-            try await client.show(ip: settings.deviceIP, imagePath: path)
-            let data = try await client.fetchImageData(ip: settings.deviceIP, path: path)
-            previewImage = NSImage(data: data)
-            currentImageData = data
+            try await withWakeRetry { try await client.show(ip: settings.deviceIP, imagePath: path) }
             setCurrentImagePath(path)
             currentGalleryOnDevice = picked.gallery
             statusText = statusMessage
+            // Refreshing the local preview thumbnail is best-effort — the
+            // send itself already succeeded above, so a slow or failed
+            // fetch here shouldn't get reported as the whole action having
+            // failed (it previously did, which meant a photo that had
+            // already sent successfully could still show as an error,
+            // prompting a redundant retry).
+            if let data = try? await client.fetchImageData(ip: settings.deviceIP, path: path) {
+                previewImage = NSImage(data: data)
+                currentImageData = data
+            }
         } catch {
             statusText = "Couldn't show a random photo: \(error.localizedDescription)"
         }
+    }
+
+    public struct RandomPhotoCandidate: Identifiable {
+        public let id = UUID()
+        public let devicePath: String
+        public let gallery: String
+        public let image: NSImage
+    }
+
+    /// Multiple randomly-picked device photos for the user to choose from.
+    /// Set by `prepareRandomPhotoCandidates()`, cleared by
+    /// `cancelRandomPhotoCandidates()`.
+    @Published public var randomPhotoCandidates: [RandomPhotoCandidate] = []
+
+    /// Picks 3 random photos from the selected galleries — respecting
+    /// `settings.randomWeighting`, same as `showRandomPhoto` — and renders
+    /// them for the user to pick one from, instead of `showRandomPhoto`'s
+    /// "send the first pick immediately" behavior. Kept as its own function
+    /// rather than adding a picker mode to `showRandomPhoto` itself: that
+    /// one is also what the unattended auto-random timer calls, and
+    /// shouldn't change shape or its exact status-message wording.
+    public func prepareRandomPhotoCandidates() async {
+        let galleriesToUse = settings.selectedGalleries.intersection(availableGalleryNames)
+        guard !galleriesToUse.isEmpty else {
+            statusText = "Select at least one (unlocked) gallery."
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
+            applyDeviceInfo(info)
+
+            // Caches each gallery's listing for the duration of this one
+            // call only, so picking 3 candidates that happen to land in the
+            // same gallery (likely with `.perGallery` weighting and few
+            // galleries selected) doesn't re-fetch its listing 3 times.
+            var listingCache: [String: [String]] = [:]
+            func images(in gallery: String) async throws -> [String] {
+                if let cached = listingCache[gallery] { return cached }
+                let images = try await client.fetchAllImages(ip: settings.deviceIP, gallery: gallery)
+                listingCache[gallery] = images
+                return images
+            }
+
+            var picks: [(gallery: String, name: String)] = []
+            switch settings.randomWeighting {
+            case .perPhoto:
+                var pool: [(gallery: String, name: String)] = []
+                for gallery in galleriesToUse {
+                    let names = try await images(in: gallery)
+                    pool.append(contentsOf: names.map { (gallery: gallery, name: $0) })
+                }
+                guard !pool.isEmpty else {
+                    statusText = "No images found in the selected galleries."
+                    return
+                }
+                picks = (0..<3).compactMap { _ in pool.randomElement() }
+            case .perGallery:
+                for _ in 0..<3 {
+                    guard let chosenGallery = galleriesToUse.randomElement() else { continue }
+                    let names = try await images(in: chosenGallery)
+                    guard let name = names.randomElement() else { continue }
+                    picks.append((gallery: chosenGallery, name: name))
+                }
+                guard !picks.isEmpty else {
+                    statusText = "No images found in the selected galleries."
+                    return
+                }
+            }
+
+            var candidates: [RandomPhotoCandidate] = []
+            for pick in picks {
+                let path = "/gallerys/\(pick.gallery)/\(pick.name)"
+                guard let data = try? await client.fetchImageData(ip: settings.deviceIP, path: path),
+                      let image = NSImage(data: data)
+                else { continue }
+                candidates.append(RandomPhotoCandidate(devicePath: path, gallery: pick.gallery, image: image))
+            }
+            guard !candidates.isEmpty else {
+                statusText = "Couldn't load any of the picked photos."
+                return
+            }
+            randomPhotoCandidates = candidates
+            statusText = ""
+        } catch {
+            statusText = "Couldn't pick random photos: \(error.localizedDescription)"
+        }
+    }
+
+    /// Discards pending random-photo candidates without displaying anything.
+    public func cancelRandomPhotoCandidates() {
+        randomPhotoCandidates = []
     }
 
     /// Generates a fresh image from one of the checked content sources
@@ -1011,55 +1148,65 @@ public final class PhotoController: ObservableObject {
         isBusy = true
         defer { isBusy = false }
         do {
-            statusText = "→ GET /deviceInfo"
-            let info = try await withWakeRetry { try await client.fetchDeviceInfo(ip: settings.deviceIP) }
-            applyDeviceInfo(info)
-            statusText = "← /deviceInfo OK"
-
             let gallery = candidate.gallery
-            statusText = "→ PUT /gallery?name=\(gallery)"
-            await client.ensureGallery(ip: settings.deviceIP, name: gallery)
-            statusText = "← /gallery OK"
-
             let sourceBase = sanitizeFilenameComponent(candidate.fileURL.deletingPathExtension().lastPathComponent)
             let timestamp = Int(Date().timeIntervalSince1970)
             let filename = orientedFilename("\(sourceBase)_\(timestamp)")
             let fileSizeKB = Int(candidate.jpegData.count / 1024)
 
-            // Retry upload up to 3 times if it fails
-            var uploadSuccess = false
-            var lastError: Error? = nil
-            for attempt in 1...3 {
-                do {
-                    statusText = "→ POST /upload?filename=\(filename)&gallery=\(gallery)&show_now=1\n📦 \(fileSizeKB)KB [Attempt \(attempt)/3]"
-                    let path = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: candidate.jpegData, showNow: true)
-
-                    previewImage = candidate.image
-                    currentImageData = candidate.jpegData
-                    currentImagePath = path
-                    currentLocalSourceURL = candidate.isLocalFile ? candidate.fileURL : nil
-                    currentGalleryOnDevice = gallery
-                    statusText = "← /upload OK\n✓ Displayed \(filename)"
-                    uploadSuccess = true
-                    break
-                } catch {
-                    lastError = error
-                    statusText = "← /upload failed (attempt \(attempt)/3): \(error.localizedDescription)"
-                    if attempt < 3 {
-                        try await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000) // Wait 1-2 seconds before retry
-                    }
-                }
+            // No separate up-front `/deviceInfo` probe: it isn't required
+            // for the upload to succeed, it's just one more round-trip to a
+            // frame whose embedded server already struggles with
+            // back-to-back requests. `withWakeRetry` wraps the *whole*
+            // ensure-gallery-then-upload attempt sequence below instead —
+            // and only escalates to a Bluetooth wake pulse if every one of
+            // its ordinary retries has already failed, since most timeouts
+            // here are the server being briefly busy, not the frame
+            // actually asleep, and a wake-and-wait cycle is much slower
+            // than just trying again.
+            let path = try await withWakeRetry {
+                try await self.uploadWithRetries(gallery: gallery, filename: filename, imageData: candidate.jpegData, fileSizeKB: fileSizeKB)
             }
 
-            if !uploadSuccess {
-                throw lastError ?? BloominError.badResponse("Upload failed after 3 attempts")
-            }
+            previewImage = candidate.image
+            currentImageData = candidate.jpegData
+            currentImagePath = path
+            currentLocalSourceURL = candidate.isLocalFile ? candidate.fileURL : nil
+            currentGalleryOnDevice = gallery
+            statusText = "← /upload OK\n✓ Displayed \(filename)"
 
             localFolderCandidates = []
             await loadGalleries()
         } catch {
             statusText = "✗ Upload error: \(error.localizedDescription)\n(File: \(candidate.fileURL.lastPathComponent))"
         }
+    }
+
+    /// Ensures `gallery` exists and uploads `imageData` to it, retrying the
+    /// upload itself up to 3 times with a short backoff — handles the
+    /// frame's embedded server being briefly busy without escalating to a
+    /// Bluetooth wake pulse for what's usually just a transient timeout.
+    /// The caller (`withWakeRetry`) only reaches for the wake pulse if every
+    /// attempt here still fails.
+    private func uploadWithRetries(gallery: String, filename: String, imageData: Data, fileSizeKB: Int) async throws -> String {
+        statusText = "→ PUT /gallery?name=\(gallery)"
+        await client.ensureGallery(ip: settings.deviceIP, name: gallery)
+        statusText = "← /gallery OK"
+
+        var lastError: Error = BloominError.badResponse("Upload failed after 3 attempts")
+        for attempt in 1...3 {
+            do {
+                statusText = "→ POST /upload?filename=\(filename)&gallery=\(gallery)&show_now=1\n📦 \(fileSizeKB)KB [Attempt \(attempt)/3]"
+                return try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: gallery, imageData: imageData, showNow: true)
+            } catch {
+                lastError = error
+                statusText = "← /upload failed (attempt \(attempt)/3): \(error.localizedDescription)"
+                if attempt < 3 {
+                    try await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000) // Wait 1-2 seconds before retry
+                }
+            }
+        }
+        throw lastError
     }
 
     /// Deletes the entire Random gallery from the device.

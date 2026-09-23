@@ -33,8 +33,19 @@ build_product() {
     # — so the plist is left unsealed ("Info.plist=not bound"). TCC refuses to
     # trust an unsealed NSBluetoothAlwaysUsageDescription and denies Bluetooth
     # outright, which surfaces as CBCentralManager reporting .unauthorized and
-    # every BLE wake failing silently. Ad-hoc is enough to seal it.
-    codesign --force --sign - --identifier "$bundle_id" "$bundle"
+    # every BLE wake failing silently.
+    #
+    # Signed with a stable local self-signed identity ("Blooming8 Local Dev
+    # Signing", in the login keychain — NOT exported/committed anywhere, so
+    # this will fail with "identity not found" on any other Mac until an
+    # equivalent certificate is created there too), not ad-hoc (`--sign -`):
+    # an ad-hoc signature is derived from the binary's own content hash, so
+    # it's a genuinely different signature on every rebuild. Keychain ties
+    # each stored item's access (Local Folder password, tab passwords, the
+    # remote-push token) to the signing identity that wrote it, so an
+    # ad-hoc-signed app re-prompts for Keychain access after every single
+    # rebuild. This identity stays constant across rebuilds, so it doesn't.
+    codesign --force --sign "Blooming8 Local Dev Signing" --identifier "$bundle_id" "$bundle"
     if codesign -dv "$bundle" 2>&1 | grep -q "Info.plist=not bound"; then
         echo "ERROR: Info.plist still unsealed in $bundle; Bluetooth will be denied." >&2
         exit 1

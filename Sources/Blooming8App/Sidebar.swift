@@ -43,6 +43,11 @@ struct Sidebar: View {
                     ForEach(visibleGalleries, id: \.self) { name in
                         row(.gallery(name), isLocked: lockedTab(for: name) != nil)
                             .contextMenu {
+                                Button("Download Gallery…") {
+                                    guard let folder = FilePicker.chooseFolder() else { return }
+                                    Task { await controller.downloadGallery(name, to: folder) }
+                                }
+                                Divider()
                                 Button("Delete Gallery…", role: .destructive) {
                                     galleryPendingDeletion = name
                                 }

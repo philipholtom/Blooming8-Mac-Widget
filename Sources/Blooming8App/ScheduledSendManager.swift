@@ -38,9 +38,17 @@ final class ScheduledSendManager: ObservableObject {
         // behind. That's what produced the originally observed bug: setting
         // the time to 13:45 left the next-fire caption (and the real timer)
         // still targeting 13:44.
+        //
+        // `.removeDuplicates()`: `frameProfiles` now backs every per-frame
+        // setting, not just `scheduledSend` — without this, editing an
+        // unrelated favorite or tab would re-trigger `reschedule` too
+        // (cheap here, just a Timer, but still pointless churn — see the
+        // same pattern's more serious network-flooding version fixed in
+        // `PhotoController.init`).
         cancellable = Publishers.CombineLatest(settings.$frameProfiles, settings.$activeFrameProfileID)
-            .sink { [weak self] profiles, activeID in
-                let schedule = profiles.first(where: { $0.id == activeID })?.scheduledSend
+            .map { profiles, activeID in profiles.first(where: { $0.id == activeID })?.scheduledSend }
+            .removeDuplicates()
+            .sink { [weak self] schedule in
                 self?.reschedule(with: schedule)
             }
     }
