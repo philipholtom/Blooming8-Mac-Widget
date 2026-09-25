@@ -237,6 +237,25 @@ public func renderFilled(cgImage: CGImage, width: Int, height: Int) -> NSImage? 
     }
 }
 
+/// Renders the part of `cgImage` that `crop` selects so it exactly fills a
+/// `width`x`height` canvas. The selected rectangle has the canvas's own
+/// aspect ratio, so this scales it to fit with nothing left over.
+public func renderCropped(cgImage: CGImage, crop: CropRegion, width: Int, height: Int) -> NSImage? {
+    let imageWidth = Double(cgImage.width)
+    let imageHeight = Double(cgImage.height)
+    let region = crop.pixelRect(imageWidth: imageWidth, imageHeight: imageHeight, canvasAspect: Double(width) / Double(height))
+    let scale = CGFloat(width) / region.width
+    let rect = NSRect(
+        x: -region.minX * scale,
+        y: -region.minY * scale,
+        width: imageWidth * scale,
+        height: imageHeight * scale
+    )
+    return ImageCanvas.render(width: width, height: height) {
+        drawImage(NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height)), in: rect)
+    }
+}
+
 public func fittingFontSize(
     for text: String,
     fontName: String,

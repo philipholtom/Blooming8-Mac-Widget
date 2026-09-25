@@ -39,6 +39,10 @@ struct LocalFolderCandidatePickerSheet: View {
     @State private var isSending = false
     @State private var selected: PhotoController.LocalFolderCandidate?
     @State private var fetchError: String?
+    @State private var showCrop = false
+    /// The crop last applied to `selected`, so reopening the crop window
+    /// starts from it rather than from the centre.
+    @State private var appliedCrop: CropRegion?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -115,6 +119,7 @@ struct LocalFolderCandidatePickerSheet: View {
                         .contentShape(Rectangle())
                         .onTapGesture {
                             selected = candidate
+                            appliedCrop = nil
                             stage = .confirming
                         }
                 }
@@ -156,6 +161,11 @@ struct LocalFolderCandidatePickerSheet: View {
                 }
                 .disabled(isSending)
 
+                if let selected, controller.canCrop(selected) {
+                    Button("Crop…") { showCrop = true }
+                        .disabled(isSending)
+                }
+
                 Spacer()
 
                 Button {
@@ -172,6 +182,20 @@ struct LocalFolderCandidatePickerSheet: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .sheet(isPresented: $showCrop) {
+            if let selected {
+                CropSheet(
+                    imageURL: selected.fileURL,
+                    canvasAspect: Double(controller.settings.renderWidth) / Double(controller.settings.renderHeight),
+                    initial: appliedCrop ?? .centered
+                ) { region in
+                    if let updated = controller.cropped(selected, crop: region) {
+                        self.selected = updated
+                        appliedCrop = region
+                    }
+                }
+            }
+        }
     }
 
     private func refresh() async {

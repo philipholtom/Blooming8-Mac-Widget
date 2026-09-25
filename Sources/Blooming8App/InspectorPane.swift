@@ -12,6 +12,7 @@ struct InspectorPane: View {
     @State private var preview: NSImage?
     @State private var info: [(String, String)] = []
     @State private var isSending = false
+    @State private var showCrop = false
 
     var body: some View {
         ScrollView {
@@ -47,6 +48,16 @@ struct InspectorPane: View {
             .padding(14)
         }
         .task(id: item.id) { await loadDetail() }
+        .sheet(isPresented: $showCrop) {
+            if let url = item.url {
+                CropSheet(
+                    imageURL: url,
+                    canvasAspect: Double(settings.renderWidth) / Double(settings.renderHeight)
+                ) { region in
+                    Task { await controller.sendCropped(fileURL: url, crop: region) }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -81,6 +92,16 @@ struct InspectorPane: View {
             .buttonStyle(.borderedProminent)
             .frame(maxWidth: .infinity)
             .disabled(isSending || controller.isBusy)
+
+            if item.url != nil, !item.isVideo {
+                Button {
+                    showCrop = true
+                } label: {
+                    Label("Crop & Send…", systemImage: "crop")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(isSending || controller.isBusy)
+            }
 
             if let url = item.url {
                 if settings.favoriteImagePaths.contains(url.path) {

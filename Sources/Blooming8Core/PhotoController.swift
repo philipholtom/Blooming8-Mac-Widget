@@ -932,11 +932,15 @@ public final class PhotoController: ObservableObject {
     /// renders changes (crop, canvas size/orientation) — either way the old
     /// copy on the frame is no longer the right thing to show. `nonisolated`
     /// so the background render task can call it.
-    nonisolated private static func sourceKey(forFile url: URL, cropLandscapePhotos: Bool, width: Int, height: Int) -> String? {
+    nonisolated private static func sourceKey(forFile url: URL, cropLandscapePhotos: Bool, width: Int, height: Int, crop: CropRegion? = nil) -> String? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
         let modified = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
-        return shortHash("\(url.path)|\(modified)|\(size)|\(cropLandscapePhotos)|\(width)x\(height)")
+        var text = "\(url.path)|\(modified)|\(size)|\(cropLandscapePhotos)|\(width)x\(height)"
+        // Appended only for an explicit crop, so photos sent without one keep
+        // exactly the key (and so the on-frame filename) they always had.
+        if let crop { text += "|crop:\(crop.keyDescription)" }
+        return shortHash(text)
     }
 
     nonisolated private static func sourceKey(forPhotosAsset id: String, cropLandscapePhotos: Bool, width: Int, height: Int) -> String {
@@ -1200,6 +1204,41 @@ public final class PhotoController: ObservableObject {
         }
         localFolderCandidates = [candidate]
         statusText = ""
+    }
+
+    /// Whether `candidate` was rendered from a still image file on disk that
+    /// can be re-rendered with a chosen crop. False for generated images,
+    /// Photos-library items and video frames, which have no such file.
+    public func canCrop(_ candidate: LocalFolderCandidate) -> Bool {
+        candidate.isLocalFile
+            && ImageFolder.imageFileExtensions.contains(candidate.fileURL.pathExtension.lowercased())
+            && FileManager.default.fileExists(atPath: candidate.fileURL.path)
+    }
+
+    /// `candidate` re-rendered from its source file with `crop` instead of
+    /// the default fit, ready to confirm. Its `sourceKey` includes the crop,
+    /// so a differently-cropped copy of the same photo is a different file
+    /// on the frame rather than being mistaken for one already uploaded.
+    public func cropped(_ candidate: LocalFolderCandidate, crop: CropRegion) -> LocalFolderCandidate? {
+        guard canCrop(candidate),
+              let cgImage = loadUprightCGImage(at: candidate.fileURL),
+              let image = renderCropped(cgImage: cgImage, crop: crop, width: settings.renderWidth, height: settings.renderHeight),
+              let jpeg = ImageCanvas.jpegData(image)
+        else {
+            statusText = "Couldn't crop '\(candidate.fileURL.lastPathComponent)'."
+            return nil
+        }
+        var result = LocalFolderCandidate(fileURL: candidate.fileURL, image: image, jpegData: jpeg, gallery: candidate.gallery, isLocalFile: true)
+        result.sourceKey = Self.sourceKey(forFile: candidate.fileURL, cropLandscapePhotos: settings.cropLandscapePhotos, width: settings.renderWidth, height: settings.renderHeight, crop: crop)
+        return result
+    }
+
+    /// Prepares `fileURL` normally, applies `crop`, and sends the result.
+    public func sendCropped(fileURL: URL, crop: CropRegion) async {
+        prepareBrowsedImage(url: fileURL)
+        guard let base = localFolderCandidates.first, let candidate = cropped(base, crop: crop) else { return }
+        await confirmLocalFolderCandidate(candidate)
+        cancelLocalFolderCandidate()
     }
 
     /// Uploads the approved candidate to its `gallery` and displays it

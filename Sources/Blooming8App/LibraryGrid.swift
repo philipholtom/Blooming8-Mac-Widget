@@ -17,6 +17,7 @@ struct LibraryGrid: View {
     /// confirmed regardless of whether it's one image or a whole selection.
     @State private var pendingDeletion: [LibraryItem]?
     @State private var pendingMove: [LibraryItem]?
+    @State private var cropTarget: LibraryItem?
     @State private var isDropTargeted = false
 
     /// The gallery currently being browsed, if any — used both to know
@@ -45,6 +46,16 @@ struct LibraryGrid: View {
         .sheet(item: $videoForFramePicker) { item in
             if let url = item.url {
                 VideoFramePickerSheet(videoURL: url, controller: controller)
+            }
+        }
+        .sheet(item: $cropTarget) { item in
+            if let url = item.url {
+                CropSheet(
+                    imageURL: url,
+                    canvasAspect: Double(controller.settings.renderWidth) / Double(controller.settings.renderHeight)
+                ) { region in
+                    Task { await controller.sendCropped(fileURL: url, crop: region) }
+                }
             }
         }
         .sheet(isPresented: Binding(get: { pendingMove != nil }, set: { if !$0 { pendingMove = nil } })) {
@@ -228,6 +239,9 @@ struct LibraryGrid: View {
             }
         } else {
             Button("Send to Frame") { send(item) }
+            if item.url != nil {
+                Button("Crop & Send…") { cropTarget = item }
+            }
         }
 
         let deletableTargets = targets.filter { $0.galleryName != nil }
