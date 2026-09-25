@@ -36,7 +36,7 @@ struct RootView: View {
         // more complex than the long-stable HSplitView already used for the
         // grid/inspector split below) with HSplitView here resolved it.
         HSplitView {
-            Sidebar(settings: settings, controller: controller, source: $source)
+            Sidebar(settings: settings, controller: controller, source: $source, onUpload: uploadPhotos(to:))
                 .frame(minWidth: 200, idealWidth: 230, maxWidth: 320)
 
             detail
@@ -217,6 +217,7 @@ struct RootView: View {
 
             if let galleryName = activeGalleryName {
                 Menu {
+                    Button("Upload Photos…") { uploadPhotos(to: galleryName) }
                     Button("Download Gallery…") {
                         guard let folder = FilePicker.chooseFolder() else { return }
                         Task { await controller.downloadGallery(galleryName, to: folder) }
@@ -250,6 +251,19 @@ struct RootView: View {
             } label: {
                 ToolbarLabel(title: "Settings", systemImage: "gearshape")
             }
+        }
+    }
+
+    /// Asks for image files and uploads them into `gallery` — the same action
+    /// as dropping files onto that gallery's grid, for people who'd rather
+    /// pick them than drag them. Reloads the grid afterwards if that gallery
+    /// is the one on screen.
+    private func uploadPhotos(to gallery: String) {
+        let urls = FilePicker.chooseImages()
+        guard !urls.isEmpty else { return }
+        Task {
+            await controller.uploadPhotos(urls: urls, gallery: gallery)
+            if activeSource == .gallery(gallery) { library.load(.gallery(gallery)) }
         }
     }
 

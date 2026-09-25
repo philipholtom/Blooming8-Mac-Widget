@@ -34,6 +34,7 @@ struct SettingsSheet: View {
     @State private var thumbnailCacheSizeBytes = 0
     @State private var newFrameProfileName = ""
     @State private var pendingFrameProfileDeletion: FrameProfile?
+    @State private var category: SettingsCategory = .frame
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -43,11 +44,22 @@ struct SettingsSheet: View {
                 .padding(.top, 20)
                 .padding(.bottom, 12)
 
-            Form {
+            HStack(spacing: 0) {
+                List(SettingsCategory.allCases, selection: Binding<SettingsCategory?>(get: { category }, set: { newValue in if let newValue { category = newValue } })) { item in
+                    Label(item.rawValue, systemImage: item.symbol)
+                        .tag(item)
+                }
+                .listStyle(.sidebar)
+                .frame(width: 190)
+
+                Divider()
+
+                Form {
+                    switch category {
+                    case .frame:
                 Section("Frame Profiles") {
                     frameProfilesSection
                 }
-
                 Section("Frame") {
                     TextField("IP address", text: $ipDraft, prompt: Text("192.168.1.42"))
                     HStack {
@@ -67,26 +79,10 @@ struct SettingsSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                Section("Remote Push") {
-                    SecureField("API token", text: $einkshotTokenDraft, prompt: Text(settings.einkshotToken == nil ? "Not set" : "Token is set — enter a new one to replace it"))
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(saveEinkshotToken)
-                    HStack {
-                        Button("Save Token") { saveEinkshotToken() }
-                            .disabled(einkshotTokenDraft.trimmingCharacters(in: .whitespaces).isEmpty)
-                        if settings.einkshotToken != nil {
-                            Button("Remove Token", role: .destructive) {
-                                settings.einkshotToken = nil
-                                einkshotTokenDraft = ""
-                            }
-                        }
-                    }
-                    Text("Lets Send Remotely push a photo to the frame over the internet, not just your home network. Get a token from the Bloomin8 phone app: Devices tab → device card → ⋮ menu → API Token.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Section("Device") {
+                    deviceSettingsSection
                 }
-
+                    case .photos:
                 Section("Photos") {
                     Toggle("Crop landscape photos to fill the frame", isOn: $settings.cropLandscapePhotos)
                     Text("Off: a landscape photo shows in full, with black bars above and below. On: it's cropped and centered to fill the whole screen instead. Portrait photos aren't affected.")
@@ -110,7 +106,6 @@ struct SettingsSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
                 Section("Local Folder") {
                     HStack {
                         Text(settings.randomFolderPath.isEmpty ? "No folder chosen" : settings.randomFolderPath)
@@ -126,11 +121,20 @@ struct SettingsSheet: View {
                         }
                     }
                 }
-
+                    case .automation:
+                Section("Automatic Random Photo") {
+                    autoRandomSection
+                }
+                Section("Scheduled Send") {
+                    scheduledSendSection
+                }
+                    case .galleries:
+                Section("Tabs") {
+                    tabsSection
+                }
                 Section("Local Folder & Favorites Password") {
                     localFolderPasswordSection
                 }
-
                 Section("Security") {
                     Toggle("Use Touch ID to unlock", isOn: $settings.useTouchIDForLocks)
                         .disabled(!BiometricAuth.isAvailable())
@@ -140,7 +144,25 @@ struct SettingsSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
+                    case .online:
+                Section("Remote Push") {
+                    SecureField("API token", text: $einkshotTokenDraft, prompt: Text(settings.einkshotToken == nil ? "Not set" : "Token is set — enter a new one to replace it"))
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(saveEinkshotToken)
+                    HStack {
+                        Button("Save Token") { saveEinkshotToken() }
+                            .disabled(einkshotTokenDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                        if settings.einkshotToken != nil {
+                            Button("Remove Token", role: .destructive) {
+                                settings.einkshotToken = nil
+                                einkshotTokenDraft = ""
+                            }
+                        }
+                    }
+                    Text("Lets Send Remotely push a photo to the frame over the internet, not just your home network. Get a token from the Bloomin8 phone app: Devices tab → device card → ⋮ menu → API Token.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Section("Generated Content") {
                     TextField("NASA API key", text: $nasaKeyDraft, prompt: Text("DEMO_KEY"))
                     Text("Used for Photo of the Day. The public demo key is rate-limited.")
@@ -197,24 +219,10 @@ struct SettingsSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                Section("Device") {
-                    deviceSettingsSection
+                    }
                 }
-
-                Section("Automatic Random Photo") {
-                    autoRandomSection
-                }
-
-                Section("Scheduled Send") {
-                    scheduledSendSection
-                }
-
-                Section("Tabs") {
-                    tabsSection
-                }
+                .formStyle(.grouped)
             }
-            .formStyle(.grouped)
 
             Divider()
 
@@ -227,7 +235,7 @@ struct SettingsSheet: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 520, idealWidth: 560, minHeight: 470, idealHeight: 640, maxHeight: 800)
+        .frame(minWidth: 760, idealWidth: 800, minHeight: 500, idealHeight: 640, maxHeight: 800)
         .sheet(isPresented: $showConnectCanvas) {
             ConnectCanvasView { name, ip in
                 bleNameDraft = name
@@ -745,6 +753,28 @@ struct SettingsSheet: View {
         Task {
             await controller.refreshCurrentPhoto()
             await controller.loadGalleries()
+        }
+    }
+}
+
+
+/// Sidebar groupings for the settings window.
+private enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
+    case frame = "Frame"
+    case photos = "Photos"
+    case automation = "Automation"
+    case galleries = "Galleries & Privacy"
+    case online = "Online"
+
+    var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .frame: return "display"
+        case .photos: return "photo.on.rectangle"
+        case .automation: return "clock.arrow.2.circlepath"
+        case .galleries: return "lock"
+        case .online: return "globe"
         }
     }
 }

@@ -350,22 +350,49 @@ public final class PhotoController: ObservableObject {
 
             var uploaded = 0
             var failed = 0
-            for (index, url) in urls.enumerated() {
-                statusText = "Uploading \(url.lastPathComponent) (\(index + 1)/\(urls.count))..."
-                guard let cgImage = loadUprightCGImage(at: url),
-                      let framed = renderForFrame(cgImage: cgImage, width: settings.renderWidth, height: settings.renderHeight, cropLandscapePhotos: settings.cropLandscapePhotos),
-                      let jpeg = ImageCanvas.jpegData(framed)
-                else {
-                    failed += 1
-                    continue
+            // Batches ride one /image/uploadMulti request each (about 3.5x
+            // faster than one request per photo on the real frame); small
+            // enough that a failed batch is cheap to retry photo-by-photo.
+            let batchSize = 5
+            var start = 0
+            while start < urls.count {
+                let end = min(start + batchSize, urls.count)
+                var batch: [(filename: String, data: Data)] = []
+                for index in start..<end {
+                    let url = urls[index]
+                    statusText = "Preparing \(url.lastPathComponent) (\(index + 1)/\(urls.count))..."
+                    guard let cgImage = loadUprightCGImage(at: url),
+                          let framed = renderForFrame(cgImage: cgImage, width: settings.renderWidth, height: settings.renderHeight, cropLandscapePhotos: settings.cropLandscapePhotos),
+                          let jpeg = ImageCanvas.jpegData(framed)
+                    else {
+                        failed += 1
+                        continue
+                    }
+                    let baseName = sanitizeFilenameComponent(url.deletingPathExtension().lastPathComponent)
+                    let filename = orientedFilename("\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(index)")
+                    batch.append((filename, jpeg))
                 }
-                let baseName = sanitizeFilenameComponent(url.deletingPathExtension().lastPathComponent)
-                let filename = orientedFilename("\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(index)")
-                do {
-                    _ = try await client.uploadImage(ip: settings.deviceIP, filename: filename, gallery: trimmedGallery, imageData: jpeg, showNow: false)
-                    uploaded += 1
-                } catch {
-                    failed += 1
+                start = end
+                guard !batch.isEmpty else { continue }
+
+                statusText = "Uploading \(uploaded + failed + 1)–\(uploaded + failed + batch.count) of \(urls.count)..."
+                var confirmed: Set<String> = []
+                if let names = try? await client.uploadImages(ip: settings.deviceIP, gallery: trimmedGallery, files: batch) {
+                    confirmed = Set(names)
+                }
+                for file in batch {
+                    // Anything the batch didn't confirm (or the whole batch, if
+                    // it failed outright) gets the proven single-file path.
+                    if confirmed.contains(file.filename) || confirmed.contains(file.filename + ".jpg") {
+                        uploaded += 1
+                        continue
+                    }
+                    do {
+                        _ = try await client.uploadImage(ip: settings.deviceIP, filename: file.filename, gallery: trimmedGallery, imageData: file.data, showNow: false)
+                        uploaded += 1
+                    } catch {
+                        failed += 1
+                    }
                 }
             }
             let failedSuffix = failed > 0 ? " (\(failed) failed)" : ""

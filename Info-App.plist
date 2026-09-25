@@ -2,36 +2,36 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>
-    <string>Blooming8</string>
-    <key>CFBundleDisplayName</key>
-    <string>Blooming8</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.pholtom.blooming8app</string>
-    <key>CFBundleExecutable</key>
-    <string>Blooming8App</string>
-    <key>CFBundleVersion</key>
-    <string>10</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.9</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSLocalNetworkUsageDescription</key>
-    <string>Blooming8 connects to your photo frame over your local Wi-Fi network to show the current photo and display new ones.</string>
-    <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>Blooming8 uses Bluetooth to send a wake pulse to your photo frame when it's asleep, so it can reconnect over Wi-Fi.</string>
-    <key>NSPhotoLibraryUsageDescription</key>
-    <string>Blooming8 reads your Photos library so you can browse and send photos to your frame.</string>
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsLocalNetworking</key>
-        <true/>
-    </dict>
+	<key>CFBundleDisplayName</key>
+	<string>Blooming8</string>
+	<key>CFBundleExecutable</key>
+	<string>Blooming8App</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.pholtom.blooming8app</string>
+	<key>CFBundleName</key>
+	<string>Blooming8</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.12</string>
+	<key>CFBundleVersion</key>
+	<string>13</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Blooming8 uses Bluetooth to send a wake pulse to your photo frame when it's asleep, so it can reconnect over Wi-Fi.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Blooming8 connects to your photo frame over your local Wi-Fi network to show the current photo and display new ones.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Blooming8 reads your Photos library so you can browse and send photos to your frame.</string>
 </dict>
 </plist>

@@ -8,6 +8,8 @@ struct Sidebar: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var controller: PhotoController
     @Binding var source: LibrarySource?
+    /// Picks image files and uploads them into the named gallery.
+    let onUpload: (String) -> Void
 
     @State private var showNewGallerySheet = false
     @State private var newGalleryName = ""
@@ -43,6 +45,7 @@ struct Sidebar: View {
                     ForEach(visibleGalleries, id: \.self) { name in
                         row(.gallery(name), isLocked: lockedTab(for: name) != nil)
                             .contextMenu {
+                                Button("Upload Photos…") { onUpload(name) }
                                 Button("Download Gallery…") {
                                     guard let folder = FilePicker.chooseFolder() else { return }
                                     Task { await controller.downloadGallery(name, to: folder) }
