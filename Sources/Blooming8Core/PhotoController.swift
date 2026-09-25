@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CryptoKit
 
 @MainActor
 public final class PhotoController: ObservableObject {
@@ -916,6 +917,34 @@ public final class PhotoController: ObservableObject {
         /// favoriting afterward, since Favorites is a bookmark list of real
         /// local files everywhere else in the app.
         public let isLocalFile: Bool
+        /// A short stable fingerprint of what this candidate was rendered
+        /// from (source file/asset + the settings that change its render),
+        /// or nil when there's nothing stable to fingerprint (a generated
+        /// image, a random video frame). Lets `confirmLocalFolderCandidate`
+        /// name the upload deterministically and, if that exact file is
+        /// already on the frame, just display it instead of uploading a
+        /// second copy.
+        public var sourceKey: String? = nil
+    }
+
+    /// `path|modified|size|crop|WxH` for a local file, hashed to 8 hex chars.
+    /// Changes when the file is edited or when a setting that changes how it
+    /// renders changes (crop, canvas size/orientation) — either way the old
+    /// copy on the frame is no longer the right thing to show. `nonisolated`
+    /// so the background render task can call it.
+    nonisolated private static func sourceKey(forFile url: URL, cropLandscapePhotos: Bool, width: Int, height: Int) -> String? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
+        let modified = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+        return shortHash("\(url.path)|\(modified)|\(size)|\(cropLandscapePhotos)|\(width)x\(height)")
+    }
+
+    nonisolated private static func sourceKey(forPhotosAsset id: String, cropLandscapePhotos: Bool, width: Int, height: Int) -> String {
+        shortHash("photos|\(id)|\(cropLandscapePhotos)|\(width)x\(height)")
+    }
+
+    nonisolated private static func shortHash(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Multiple randomly-picked candidates for the user to choose from.
@@ -936,13 +965,36 @@ public final class PhotoController: ObservableObject {
             statusText = "No photos found in '\(folderURL.lastPathComponent)'."
             return
         }
+        renderRandomCandidates(from: allImages, unreadableMessage: "Couldn't read any photos from '\(folderURL.lastPathComponent)'.")
+    }
+
+    /// Same 3-candidate preview as `prepareLocalFolderCandidate`, but drawn
+    /// from the Favourites list instead of the whole Local Folder. Favourites
+    /// are plain file paths that may point at an external volume that isn't
+    /// mounted right now, so missing files are filtered out up front.
+    public func prepareFavoritesCandidate() {
+        let existing = settings.favoriteImagePaths
+            .filter { FileManager.default.fileExists(atPath: $0) }
+            .map { URL(fileURLWithPath: $0) }
+        guard !existing.isEmpty else {
+            statusText = settings.favoriteImagePaths.isEmpty
+                ? "No favourites yet."
+                : "None of your favourites could be found — is the drive they live on connected?"
+            return
+        }
+        renderRandomCandidates(from: existing, unreadableMessage: "Couldn't read any of your favourites.")
+    }
+
+    /// Picks up to 3 of `urls` at random, renders them for the frame off the
+    /// main thread, and publishes them as `localFolderCandidates`.
+    private func renderRandomCandidates(from urls: [URL], unreadableMessage: String) {
         let cropLandscapePhotos = settings.cropLandscapePhotos
         let renderWidth = settings.renderWidth
         let renderHeight = settings.renderHeight
 
         Task.detached(priority: .userInitiated) { [weak self] in
             var candidates: [LocalFolderCandidate] = []
-            let chosenURLs = allImages.shuffled().prefix(min(3, allImages.count))
+            let chosenURLs = urls.shuffled().prefix(min(3, urls.count))
 
             for chosen in chosenURLs {
                 guard let cgImage = loadUprightCGImage(at: chosen),
@@ -951,12 +1003,14 @@ public final class PhotoController: ObservableObject {
                 else {
                     continue
                 }
-                candidates.append(LocalFolderCandidate(fileURL: chosen, image: framed, jpegData: jpeg, gallery: "Random", isLocalFile: true))
+                var candidate = LocalFolderCandidate(fileURL: chosen, image: framed, jpegData: jpeg, gallery: "Random", isLocalFile: true)
+                candidate.sourceKey = Self.sourceKey(forFile: chosen, cropLandscapePhotos: cropLandscapePhotos, width: renderWidth, height: renderHeight)
+                candidates.append(candidate)
             }
 
             await MainActor.run {
                 guard !candidates.isEmpty else {
-                    self?.statusText = "Couldn't read any photos from '\(folderURL.lastPathComponent)'."
+                    self?.statusText = unreadableMessage
                     return
                 }
 
@@ -1103,7 +1157,9 @@ public final class PhotoController: ObservableObject {
             statusText = "Couldn't read '\(url.lastPathComponent)'."
             return
         }
-        localFolderCandidates = [LocalFolderCandidate(fileURL: url, image: framed, jpegData: jpeg, gallery: "Random", isLocalFile: true)]
+        var candidate = LocalFolderCandidate(fileURL: url, image: framed, jpegData: jpeg, gallery: "Random", isLocalFile: true)
+        candidate.sourceKey = Self.sourceKey(forFile: url, cropLandscapePhotos: settings.cropLandscapePhotos, width: settings.renderWidth, height: settings.renderHeight)
+        localFolderCandidates = [candidate]
         statusText = ""
     }
 
@@ -1129,7 +1185,7 @@ public final class PhotoController: ObservableObject {
     /// sanitized first since `confirmLocalFolderCandidate` uses it verbatim
     /// and the frame's upload endpoint shouldn't have to deal with commas,
     /// colons, or spaces in a filename.
-    public func preparePhotosLibraryImage(data: Data, displayName: String) {
+    public func preparePhotosLibraryImage(data: Data, displayName: String, assetID: String? = nil) {
         guard let cgImage = loadUprightCGImage(data: data),
               let framed = renderForFrame(cgImage: cgImage, width: settings.renderWidth, height: settings.renderHeight, cropLandscapePhotos: settings.cropLandscapePhotos),
               let jpeg = ImageCanvas.jpegData(framed)
@@ -1138,7 +1194,11 @@ public final class PhotoController: ObservableObject {
             return
         }
         let safeName = sanitizeFilenameComponent(displayName)
-        localFolderCandidates = [LocalFolderCandidate(fileURL: URL(fileURLWithPath: safeName), image: framed, jpegData: jpeg, gallery: "Apple", isLocalFile: false)]
+        var candidate = LocalFolderCandidate(fileURL: URL(fileURLWithPath: safeName), image: framed, jpegData: jpeg, gallery: "Apple", isLocalFile: false)
+        if let assetID {
+            candidate.sourceKey = Self.sourceKey(forPhotosAsset: assetID, cropLandscapePhotos: settings.cropLandscapePhotos, width: settings.renderWidth, height: settings.renderHeight)
+        }
+        localFolderCandidates = [candidate]
         statusText = ""
     }
 
@@ -1150,9 +1210,37 @@ public final class PhotoController: ObservableObject {
         do {
             let gallery = candidate.gallery
             let sourceBase = sanitizeFilenameComponent(candidate.fileURL.deletingPathExtension().lastPathComponent)
-            let timestamp = Int(Date().timeIntervalSince1970)
-            let filename = orientedFilename("\(sourceBase)_\(timestamp)")
             let fileSizeKB = Int(candidate.jpegData.count / 1024)
+            // A candidate with a `sourceKey` gets a deterministic name (same
+            // photo + same render settings = same filename) instead of a
+            // timestamp, so sending it again finds the copy already on the
+            // frame rather than uploading another one. Uploads to this frame
+            // take 10-40s, so displaying what's already there is also much
+            // faster.
+            let filename: String
+            if let key = candidate.sourceKey {
+                filename = orientedFilename("\(sourceBase)-\(key)")
+                let existingPath = "/gallerys/\(gallery)/\(filename)"
+                statusText = "Checking whether it's already on the frame…"
+                if await client.imageExists(ip: settings.deviceIP, path: existingPath) {
+                    do {
+                        try await withWakeRetry { try await client.show(ip: settings.deviceIP, imagePath: existingPath) }
+                        previewImage = candidate.image
+                        currentImageData = candidate.jpegData
+                        currentImagePath = existingPath
+                        currentLocalSourceURL = candidate.isLocalFile ? candidate.fileURL : nil
+                        currentGalleryOnDevice = gallery
+                        statusText = "✓ Already on the frame — displayed \(filename) without uploading again"
+                        localFolderCandidates = []
+                        return
+                    } catch {
+                        // Couldn't show the existing copy (deleted since the
+                        // check, frame busy) — fall through to a normal upload.
+                    }
+                }
+            } else {
+                filename = orientedFilename("\(sourceBase)_\(Int(Date().timeIntervalSince1970))")
+            }
 
             // No separate up-front `/deviceInfo` probe: it isn't required
             // for the upload to succeed, it's just one more round-trip to a

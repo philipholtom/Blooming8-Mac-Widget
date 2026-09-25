@@ -10,7 +10,22 @@ import SwiftUI
 /// used to send immediately with no picker step; this restores parity with
 /// the widget.
 struct LocalFolderCandidatePickerSheet: View {
+    /// Which pool of local photos the 3 candidates are drawn from — the
+    /// picking/confirming flow itself is identical either way.
+    enum Source {
+        case localFolder
+        case favorites
+
+        var title: String {
+            switch self {
+            case .localFolder: return "Random from Local Folder"
+            case .favorites: return "Random from Favourites"
+            }
+        }
+    }
+
     @ObservedObject var controller: PhotoController
+    var source: Source = .localFolder
     @Environment(\.dismiss) private var dismiss
 
     private enum Stage {
@@ -28,7 +43,7 @@ struct LocalFolderCandidatePickerSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Random from Local Folder")
+                Text(source.title)
                     .font(.headline)
                 Spacer()
                 if stage == .picking, !isFetching, !controller.localFolderCandidates.isEmpty {
@@ -170,7 +185,10 @@ struct LocalFolderCandidatePickerSheet: View {
         // Task and publishes the result asynchronously rather than being
         // itself async — poll briefly for it to land, the same workaround
         // LibraryGrid.send already uses for this same method.
-        controller.prepareLocalFolderCandidate()
+        switch source {
+        case .localFolder: controller.prepareLocalFolderCandidate()
+        case .favorites: controller.prepareFavoritesCandidate()
+        }
         let deadline = Date().addingTimeInterval(15)
         while controller.localFolderCandidates.isEmpty && Date() < deadline {
             if !controller.statusText.isEmpty { break } // an error status landed
@@ -178,7 +196,7 @@ struct LocalFolderCandidatePickerSheet: View {
         }
         if controller.localFolderCandidates.isEmpty {
             fetchError = controller.statusText.isEmpty
-                ? "Couldn't find any photos in Local Folder."
+                ? "Couldn't find any photos."
                 : controller.statusText
         }
         isFetching = false

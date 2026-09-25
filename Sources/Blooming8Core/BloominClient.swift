@@ -232,6 +232,22 @@ public final class BloominClient {
         try checkStatus(response)
     }
 
+    /// Whether `path` (e.g. `/gallerys/Random/foo_P.jpg`) already exists on
+    /// the frame — a HEAD request, which the frame answers with 200/404 in
+    /// well under a second without transferring the image (checked directly
+    /// against the device). Any failure to get a definite answer (timeout,
+    /// frame asleep) reports `false`: the caller's fallback is to upload,
+    /// which is always safe, just slower.
+    public func imageExists(ip: String, path: String) async -> Bool {
+        guard let base = try? baseURL(ip: ip), let url = URL(string: base + path) else { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        guard let (_, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse
+        else { return false }
+        return http.statusCode == 200
+    }
+
     public func fetchImageData(ip: String, path: String) async throws -> Data {
         let url = try URL(string: baseURL(ip: ip) + path)!
         let (data, response) = try await session.data(from: url)

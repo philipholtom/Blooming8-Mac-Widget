@@ -11,6 +11,7 @@ struct CurrentPhotoPane: View {
     @State private var slideshowGallery = ""
     @State private var slideshowMinutes = "5"
     @State private var showLocalFolderPicker = false
+    @State private var showFavoritesPicker = false
     @State private var showRandomPhotoPicker = false
 
     var body: some View {
@@ -113,6 +114,16 @@ struct CurrentPhotoPane: View {
                     .disabled(controller.isBusy || settings.randomFolderPath.isEmpty || isLocalFolderLocked)
                     .help(localFolderButtonHelp)
 
+                    Button {
+                        showFavoritesPicker = true
+                    } label: {
+                        Label("Random from Favourites", systemImage: "star")
+                    }
+                    .disabled(controller.isBusy || settings.favoriteImagePaths.isEmpty || isLocalFolderLocked)
+                    .help(settings.favoriteImagePaths.isEmpty
+                        ? "No favourites yet"
+                        : (isLocalFolderLocked ? "Favourites are locked — unlock them from the sidebar first" : "Picks 3 random favourites to choose from, with Next for 3 more"))
+
                     Button("Redisplay") {
                         Task { await controller.redisplayCurrentPhoto() }
                     }
@@ -174,6 +185,9 @@ struct CurrentPhotoPane: View {
         }
         .sheet(isPresented: $showLocalFolderPicker) {
             LocalFolderCandidatePickerSheet(controller: controller)
+        }
+        .sheet(isPresented: $showFavoritesPicker) {
+            LocalFolderCandidatePickerSheet(controller: controller, source: .favorites)
         }
         .sheet(isPresented: $showRandomPhotoPicker) {
             RandomPhotoPickerSheet(controller: controller)

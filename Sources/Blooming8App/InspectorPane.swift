@@ -126,7 +126,7 @@ struct InspectorPane: View {
                 await controller.showImageAtPath(devicePath)
             } else if let assetID = item.photoAssetID {
                 guard let data = await PhotosLibrarySource.fetchOriginalData(assetID: assetID) else { return }
-                controller.preparePhotosLibraryImage(data: data, displayName: item.name)
+                controller.preparePhotosLibraryImage(data: data, displayName: item.name, assetID: assetID)
                 if let candidate = controller.localFolderCandidates.first {
                     await controller.confirmLocalFolderCandidate(candidate)
                     controller.cancelLocalFolderCandidate()
