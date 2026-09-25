@@ -232,6 +232,15 @@ public final class BloominClient {
         try checkStatus(response)
     }
 
+    /// The frame's keep-alive: per the API docs, periodic calls stop it
+    /// entering idle sleep. There's no "off" call — stopping the calls is
+    /// how it's released.
+    public func whistle(ip: String) async throws {
+        let url = URL(string: try baseURL(ip: ip) + "/whistle")!
+        let (_, response) = try await session.data(from: url)
+        try checkStatus(response)
+    }
+
     /// Whether `path` (e.g. `/gallerys/Random/foo_P.jpg`) already exists on
     /// the frame — a HEAD request, which the frame answers with 200/404 in
     /// well under a second without transferring the image (checked directly

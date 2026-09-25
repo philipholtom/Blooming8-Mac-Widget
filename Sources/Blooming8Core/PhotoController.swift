@@ -52,6 +52,30 @@ public final class PhotoController: ObservableObject {
     /// device IP is set yet, or the first check hasn't completed.
     @Published public var isDeviceAwake: Bool?
 
+    /// Keeps the frame from idling into sleep by calling its `/whistle`
+    /// keep-alive on a timer while on. Deliberately runtime-only (never
+    /// persisted, and per process): a forgotten "stay awake" quietly
+    /// draining a battery-powered frame overnight is worse than having to
+    /// switch it on again after a relaunch. Switching profiles turns it off.
+    @Published public var keepAwake: Bool = false {
+        didSet {
+            guard keepAwake != oldValue else { return }
+            keepAwakeGeneration += 1
+            keepAwakeTimer?.invalidate()
+            keepAwakeTimer = nil
+            keepAwakeFailures = 0
+            if keepAwake { Task { await startKeepAwake(generation: keepAwakeGeneration) } }
+        }
+    }
+    private var keepAwakeTimer: Timer?
+    private var keepAwakeFailures = 0
+    /// Bumped on every toggle so a start/tick still in flight from an earlier
+    /// on/off can tell it's stale and do nothing.
+    private var keepAwakeGeneration = 0
+    /// Stop keeping it awake below this battery level; the frame's own
+    /// low-battery behaviour matters more than staying awake.
+    private static let keepAwakeMinimumBattery = 15
+
     private var autoRandomTimer: Timer?
     private var autoRandomCancellable: AnyCancellable?
     private var statusPollTimer: Timer?
@@ -122,9 +146,72 @@ public final class PhotoController: ObservableObject {
             }
     }
 
+    /// Seconds between whistles, from the frame's own idle timeout
+    /// (`/deviceInfo`'s `max_idle`, 120s on this frame): comfortably inside
+    /// it — a request to this slow server can itself take a few seconds — but
+    /// no more often than needed, since every call costs the battery.
+    private var keepAwakeInterval: TimeInterval {
+        min(max(Double(maxIdleSeconds ?? 120) * 0.4, 10), 60)
+    }
+
+    private func startKeepAwake(generation: Int) async {
+        guard !settings.deviceIP.isEmpty else {
+            statusText = "Set the frame's IP address first."
+            keepAwake = false
+            return
+        }
+        // The first whistle also wakes a frame that's already asleep (over
+        // Bluetooth); later ones don't, so an unreachable frame doesn't
+        // trigger a wake-and-scan every cycle.
+        do {
+            try await withWakeRetry { try await client.whistle(ip: settings.deviceIP) }
+        } catch {
+            guard generation == keepAwakeGeneration else { return }
+            statusText = "Couldn't keep the frame awake: \(error.localizedDescription)"
+            keepAwake = false
+            return
+        }
+        guard generation == keepAwakeGeneration else { return }
+        statusText = "Keeping the frame awake."
+        scheduleNextWhistle(generation: generation)
+    }
+
+    private func scheduleNextWhistle(generation: Int) {
+        keepAwakeTimer = Timer.scheduledTimer(withTimeInterval: keepAwakeInterval, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.whistleTick(generation: generation)
+            }
+        }
+    }
+
+    private func whistleTick(generation: Int) async {
+        guard generation == keepAwakeGeneration, keepAwake else { return }
+        if let battery = batteryPercent, battery <= Self.keepAwakeMinimumBattery {
+            statusText = "Stopped keeping the frame awake: its battery is at \(battery)%."
+            keepAwake = false
+            return
+        }
+        do {
+            try await client.whistle(ip: settings.deviceIP)
+            keepAwakeFailures = 0
+        } catch {
+            keepAwakeFailures += 1
+            if keepAwakeFailures >= 3 {
+                statusText = "Stopped keeping the frame awake: it stopped responding."
+                keepAwake = false
+                return
+            }
+        }
+        guard generation == keepAwakeGeneration else { return }
+        scheduleNextWhistle(generation: generation)
+    }
+
     /// (Re)starts the periodic awake/asleep check to match the current
     /// device IP. Always cancels any pending timer first.
     private func updateStatusPollSchedule() {
+        // Only reached when the frame being controlled changes (or at
+        // launch): a keep-awake for the previous frame doesn't carry over.
+        if keepAwake { keepAwake = false }
         statusPollTimer?.invalidate()
         statusPollTimer = nil
         guard !settings.deviceIP.isEmpty else {

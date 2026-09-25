@@ -175,7 +175,7 @@ struct RootView: View {
                         }
                     }
                 } label: {
-                    Label(activeFrameProfileName, systemImage: "photo.on.rectangle.angled")
+                    ToolbarLabel(title: activeFrameProfileName, systemImage: "photo.on.rectangle.angled")
                 }
                 .help("Switch which frame this app is controlling")
             }
@@ -183,16 +183,29 @@ struct RootView: View {
             Button {
                 Task { await controller.refreshCurrentPhoto() }
             } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
+                ToolbarLabel(title: "Refresh", systemImage: "arrow.clockwise")
             }
             .help("Re-read what the frame is currently showing")
 
             Button {
                 Task { await controller.wakeFrame() }
             } label: {
-                Label("Wake", systemImage: "sun.max")
+                ToolbarLabel(title: "Wake", systemImage: "sun.max")
             }
             .help("Send a Bluetooth wake pulse to the frame")
+
+            // A plain Button carrying its own on/off look rather than a
+            // `Toggle` with `.toggleStyle(.button)`: the toggle sized itself
+            // narrower than its label and clipped it ("Keep Awa").
+            Button {
+                controller.keepAwake.toggle()
+            } label: {
+                ToolbarLabel(title: "Keep Awake", systemImage: controller.keepAwake ? "cup.and.saucer.fill" : "cup.and.saucer")
+                    .foregroundStyle(controller.keepAwake ? Color.accentColor : Color.primary)
+            }
+            .help(controller.keepAwake
+                ? "Keeping the frame awake — click to let it sleep normally again"
+                : "Keep the frame awake instead of letting it idle to sleep (uses battery; turns off by itself if the battery gets low)")
 
             if isGridSource {
                 Slider(value: $thumbnailSize, in: 90...280) {
@@ -213,7 +226,7 @@ struct RootView: View {
                         showDeleteGalleryConfirm = true
                     }
                 } label: {
-                    Label("Gallery Actions", systemImage: "ellipsis.circle")
+                    ToolbarLabel(title: "Gallery", systemImage: "ellipsis.circle")
                 }
                 .help("Download or delete '\(galleryName)'")
             }
@@ -221,21 +234,21 @@ struct RootView: View {
             Button {
                 showLogs = true
             } label: {
-                Label("Device Logs", systemImage: "doc.text.magnifyingglass")
+                ToolbarLabel(title: "Logs", systemImage: "doc.text.magnifyingglass")
             }
             .help("View and download the frame's own diagnostic logs")
 
             Button {
                 showSendRemotely = true
             } label: {
-                Label("Send Remotely", systemImage: "antenna.radiowaves.left.and.right")
+                ToolbarLabel(title: "Remote", systemImage: "antenna.radiowaves.left.and.right")
             }
             .help("Push a photo to the frame over the internet, not just your home network")
 
             Button {
                 showSettings = true
             } label: {
-                Label("Settings", systemImage: "gearshape")
+                ToolbarLabel(title: "Settings", systemImage: "gearshape")
             }
         }
     }
@@ -271,5 +284,26 @@ struct RootView: View {
         case .currentPhoto, .generated: return false
         default: return true
         }
+    }
+}
+
+
+/// An icon with a short caption underneath, for the window toolbar — the
+/// default toolbar shows icons only, so what each one does was only
+/// discoverable by hovering for its tooltip.
+private struct ToolbarLabel: View {
+    let title: String
+    let systemImage: String
+
+    /// One line, icon then text: a caption stacked under the icon overflowed
+    /// the toolbar button's own shape (clipping the bottom of the text), and
+    /// `fixedSize` stops a long title like "Keep Awake" being truncated to
+    /// "Keep A…" when the toolbar is tight.
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: systemImage)
+            Text(title)
+        }
+        .fixedSize()
     }
 }

@@ -88,68 +88,85 @@ struct CurrentPhotoPane: View {
                     .frame(maxWidth: 260)
                 }
 
-                HStack(spacing: 10) {
-                    Button {
-                        Task { await controller.showRandomPhoto() }
-                    } label: {
-                        Label("Random Photo", systemImage: "shuffle")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(controller.isBusy)
-                    .help("Shows a random photo immediately, no preview step")
+                GroupBox("Show a Photo") {
+                    VStack(spacing: 10) {
+                        HStack(spacing: 10) {
+                            Button {
+                                Task { await controller.showRandomPhoto() }
+                            } label: {
+                                Label("Random Photo", systemImage: "shuffle")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(controller.isBusy)
+                            .help("Shows a random photo immediately, no preview step")
 
-                    Button {
-                        showRandomPhotoPicker = true
-                    } label: {
-                        Label("Random 3", systemImage: "square.grid.3x1.below.line.grid.1x2")
-                    }
-                    .disabled(controller.isBusy)
-                    .help("Picks 3 random photos to choose from, with Next for 3 more")
+                            Button {
+                                showRandomPhotoPicker = true
+                            } label: {
+                                Label("Random 3", systemImage: "square.grid.3x1.below.line.grid.1x2")
+                            }
+                            .disabled(controller.isBusy)
+                            .help("Picks 3 random photos to choose from, with Next for 3 more")
+                        }
 
-                    Button {
-                        showLocalFolderPicker = true
-                    } label: {
-                        Label("Random from Local Folder", systemImage: "folder")
-                    }
-                    .disabled(controller.isBusy || settings.randomFolderPath.isEmpty || isLocalFolderLocked)
-                    .help(localFolderButtonHelp)
+                        HStack(spacing: 10) {
+                            Button {
+                                showLocalFolderPicker = true
+                            } label: {
+                                Label("From Local Folder", systemImage: "folder")
+                            }
+                            .disabled(controller.isBusy || settings.randomFolderPath.isEmpty || isLocalFolderLocked)
+                            .help(localFolderButtonHelp)
 
-                    Button {
-                        showFavoritesPicker = true
-                    } label: {
-                        Label("Random from Favourites", systemImage: "star")
+                            Button {
+                                showFavoritesPicker = true
+                            } label: {
+                                Label("From Favourites", systemImage: "star")
+                            }
+                            .disabled(controller.isBusy || settings.favoriteImagePaths.isEmpty || isLocalFolderLocked)
+                            .help(settings.favoriteImagePaths.isEmpty
+                                ? "No favourites yet"
+                                : (isLocalFolderLocked ? "Favourites are locked — unlock them from the sidebar first" : "Picks 3 random favourites to choose from, with Next for 3 more"))
+                        }
                     }
-                    .disabled(controller.isBusy || settings.favoriteImagePaths.isEmpty || isLocalFolderLocked)
-                    .help(settings.favoriteImagePaths.isEmpty
-                        ? "No favourites yet"
-                        : (isLocalFolderLocked ? "Favourites are locked — unlock them from the sidebar first" : "Picks 3 random favourites to choose from, with Next for 3 more"))
-
-                    Button("Redisplay") {
-                        Task { await controller.redisplayCurrentPhoto() }
-                    }
-                    .disabled(controller.isBusy)
-
-                    Button("Show Next") {
-                        Task { await controller.showNextImage() }
-                    }
-                    .disabled(controller.isBusy)
-
-                    Button("Save Photo…") { savePhoto() }
-                        .disabled(controller.currentImageData == nil)
-
-                    Button {
-                        toggleCurrentImageFavorite()
-                    } label: {
-                        Label(
-                            isCurrentImageFavorited ? "Remove from Favorites" : "Add to Favorites",
-                            systemImage: isCurrentImageFavorited ? "star.slash" : "star"
-                        )
-                    }
-                    .disabled(controller.currentLocalSourceURL == nil)
-                    .help(controller.currentLocalSourceURL == nil
-                        ? "Only available for photos sent from Local Folder — Favorites is a bookmark list of local files"
-                        : (isCurrentImageFavorited ? "Remove this photo from Favorites" : "Add this photo to Favorites"))
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity)
+                    .padding(8)
                 }
+                .frame(maxWidth: 720)
+
+                GroupBox("This Photo") {
+                    HStack(spacing: 10) {
+                        Button("Redisplay") {
+                            Task { await controller.redisplayCurrentPhoto() }
+                        }
+                        .disabled(controller.isBusy)
+
+                        Button("Show Next") {
+                            Task { await controller.showNextImage() }
+                        }
+                        .disabled(controller.isBusy)
+
+                        Button("Save Photo…") { savePhoto() }
+                            .disabled(controller.currentImageData == nil)
+
+                        Button {
+                            toggleCurrentImageFavorite()
+                        } label: {
+                            Label(
+                                isCurrentImageFavorited ? "Remove from Favorites" : "Add to Favorites",
+                                systemImage: isCurrentImageFavorited ? "star.slash" : "star"
+                            )
+                        }
+                        .disabled(controller.currentLocalSourceURL == nil)
+                        .help(controller.currentLocalSourceURL == nil
+                            ? "Only available for photos sent from Local Folder — Favorites is a bookmark list of local files"
+                            : (isCurrentImageFavorited ? "Remove this photo from Favorites" : "Add this photo to Favorites"))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(8)
+                }
+                .frame(maxWidth: 720)
 
                 GroupBox("Slideshow") {
                     HStack(spacing: 8) {
