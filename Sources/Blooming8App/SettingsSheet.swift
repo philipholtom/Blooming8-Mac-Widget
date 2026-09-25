@@ -16,6 +16,8 @@ struct SettingsSheet: View {
     @State private var maxIdleMinutesDraft = ""
     @State private var sleepDurationHoursDraft = ""
     @State private var wakeSensitivityDraft = ""
+    @State private var deviceUpdateMessage: String?
+    @State private var deviceUpdateFailed = false
 
     @State private var weatherLocationNameDraft = ""
     @State private var weatherLatitudeDraft = ""
@@ -25,16 +27,24 @@ struct SettingsSheet: View {
     @State private var locationLookupError: String?
     @State private var historyHighlightYearDraft = ""
 
-    @State private var newTabName = ""
-    @State private var passwordDrafts: [UUID: String] = [:]
-    @State private var newLocalFolderPassword = ""
     @State private var showConnectCanvas = false
+
+    // Privacy panel. `privacyUnlocked` is per-visit: the panel starts locked
+    // whenever Settings opens, so locked gallery names are never on screen
+    // until the password (or Touch ID) has been given.
+    @State private var privacyUnlocked = false
+    @State private var unlockPasswordDraft = ""
+    @State private var unlockFailed = false
+    @State private var newPasswordDraft = ""
+    @State private var confirmPasswordDraft = ""
+    @State private var currentPasswordDraft = ""
+    @State private var privacyMessage: String?
     @State private var einkshotTokenDraft = ""
     @State private var showScheduledSendPhotoPicker = false
     @State private var thumbnailCacheSizeBytes = 0
     @State private var newFrameProfileName = ""
     @State private var pendingFrameProfileDeletion: FrameProfile?
-    @State private var category: SettingsCategory = .frame
+    @AppStorage("settingsSheetCategory") private var category: SettingsCategory = .frames
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -56,14 +66,17 @@ struct SettingsSheet: View {
 
                 Form {
                     switch category {
-                    case .frame:
+                    case .frames:
                 Section("Frame Profiles") {
                     frameProfilesSection
                 }
-                Section("Frame · \(activeProfileName)") {
+                    case .connection:
+                Section("Connection · \(activeProfileName)") {
                     TextField("IP address", text: $ipDraft, prompt: Text("192.168.1.42"))
+                        .textFieldStyle(.roundedBorder)
                     HStack {
                         TextField("Bluetooth name", text: $bleNameDraft, prompt: Text("Office"))
+                            .textFieldStyle(.roundedBorder)
                         Button("Scan\u{2026}") { showConnectCanvas = true }
                     }
                     Text("The Bluetooth name is used to wake the frame when it stops answering over Wi-Fi.")
@@ -119,6 +132,15 @@ struct SettingsSheet: View {
                             }
                         }
                     }
+                    HStack {
+                        Label(settings.localFolderLocked ? "Locked with a password" : "Not password-protected",
+                              systemImage: settings.localFolderLocked ? "lock.fill" : "lock.open")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button(settings.localFolderLocked ? "Change…" : "Set Password…") { category = .galleries }
+                            .font(.caption)
+                    }
                 }
                     case .automation:
                 Section("Automatic Random Photo · \(activeProfileName)") {
@@ -128,22 +150,8 @@ struct SettingsSheet: View {
                     scheduledSendSection
                 }
                     case .galleries:
-                Section("Tabs · \(activeProfileName)") {
-                    tabsSection
-                }
-                Section("Local Folder & Favorites Password") {
-                    localFolderPasswordSection
-                }
-                Section("Security") {
-                    Toggle("Use Touch ID to unlock", isOn: $settings.useTouchIDForLocks)
-                        .disabled(!BiometricAuth.isAvailable())
-                    Text(BiometricAuth.isAvailable()
-                        ? "Applies to locked gallery tabs and Local Folder/Favorites. Touch ID is tried first; the password still works as a fallback."
-                        : "Touch ID isn't available on this Mac.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                    case .online:
+                privacySections
+                    case .remote:
                 Section("Remote Push") {
                     SecureField("API token", text: $einkshotTokenDraft, prompt: Text(settings.einkshotToken == nil ? "Not set" : "Token is set — enter a new one to replace it"))
                         .textFieldStyle(.roundedBorder)
@@ -162,11 +170,19 @@ struct SettingsSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Section("Generated Content") {
-                    TextField("NASA API key", text: $nasaKeyDraft, prompt: Text("DEMO_KEY"))
-                    Text("Used for Photo of the Day. The public demo key is rate-limited.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    case .content:
+                Section("Photo of the Day") {
+                    TextField("NASA API key", text: $nasaKeyDraft, prompt: Text("Using the shared demo key"))
+                        .textFieldStyle(.roundedBorder)
+                    HStack(spacing: 4) {
+                        Text("The shared demo key is rate-limited.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Link("Get a free key", destination: URL(string: "https://api.nasa.gov")!)
+                            .font(.caption)
+                    }
+                }
+                Section("Weather") {
 
                     Text("Weather location: type a town or city and click Look Up, or edit the coordinates.")
                         .font(.caption)
@@ -213,10 +229,13 @@ struct SettingsSheet: View {
                         }
                     }
 
-                    TextField("History highlight year", text: $historyHighlightYearDraft, prompt: Text("1979"))
-                    Text("If today has a historical event from this year, it's always shown first.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                }
+                Section("On This Day") {
+                    HStack {
+                        TextField("Highlight year", text: $historyHighlightYearDraft, prompt: Text("1979"))
+                            .textFieldStyle(.roundedBorder)
+                        InfoButton("If today has a historical event from this year, it's always shown first.")
+                    }
                 }
                     case .about:
                 Section("About") {
@@ -237,7 +256,7 @@ struct SettingsSheet: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 760, idealWidth: 800, minHeight: 500, idealHeight: 640, maxHeight: 800)
+        .frame(minWidth: 760, idealWidth: 800, maxWidth: .infinity, minHeight: 500, idealHeight: 640, maxHeight: .infinity)
         .sheet(isPresented: $showConnectCanvas) {
             ConnectCanvasView { name, ip in
                 bleNameDraft = name
@@ -255,8 +274,14 @@ struct SettingsSheet: View {
         // straight to settings, and typed fields are committed when you
         // switch category, press Done, or close the window.
         .onChange(of: category) { _ in commitDrafts() }
+        .onChange(of: controller.maxIdleSeconds) { _ in
+            // The frame answered after the sheet opened (e.g. it just woke):
+            // fill the Device fields unless the user is mid-edit.
+            if !deviceDraftsChanged { syncDeviceDrafts() }
+        }
         .onDisappear { commitDrafts() }
         .onAppear {
+            migrateLegacyLocks()
             syncFrameDraftsFromActiveProfile()
             nasaKeyDraft = settings.nasaApiKey
             weatherLocationNameDraft = settings.weatherLocationName
@@ -298,6 +323,7 @@ struct SettingsSheet: View {
 
         HStack {
             TextField("New profile name", text: $newFrameProfileName)
+                .textFieldStyle(.roundedBorder)
             Button("Add Profile") {
                 let trimmed = newFrameProfileName.trimmingCharacters(in: .whitespaces)
                 guard !trimmed.isEmpty else { return }
@@ -351,6 +377,10 @@ struct SettingsSheet: View {
     private func syncFrameDraftsFromActiveProfile() {
         ipDraft = settings.deviceIP
         bleNameDraft = settings.bleDeviceName
+        syncDeviceDrafts()
+    }
+
+    private func syncDeviceDrafts() {
         deviceNameDraft = controller.deviceName ?? ""
         maxIdleMinutesDraft = controller.maxIdleSeconds.map { String($0 / 60) } ?? ""
         sleepDurationHoursDraft = controller.sleepDurationSeconds.map { String($0 / 3600) } ?? ""
@@ -360,10 +390,19 @@ struct SettingsSheet: View {
     // MARK: - Device settings (pushed to the frame itself, not just local)
 
     private var deviceSettingsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let asleep = controller.isDeviceAwake == false
+        let loaded = controller.maxIdleSeconds != nil
+        return VStack(alignment: .leading, spacing: 8) {
             Text("Applied directly to the frame, not just saved locally.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if asleep || !loaded {
+                Label(asleep ? "The frame is asleep — wake it (toolbar) to view or change these." : "Not read from the frame yet — press Refresh in the toolbar.",
+                      systemImage: "moon.zzz")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
 
             // LabeledContent, not a bare HStack of Text+TextField+Text: a raw
             // multi-element HStack as a direct Form/Section row confused
@@ -373,50 +412,73 @@ struct SettingsSheet: View {
             // Form-native way to pair a label with a control and renders
             // predictably. .roundedBorder on each field is a second,
             // unambiguous "you can type here" cue on top of that.
-            LabeledContent("Device name") {
-                TextField("", text: $deviceNameDraft)
-                    .textFieldStyle(.roundedBorder)
-            }
+            Group {
+                LabeledContent("Device name") {
+                    TextField("", text: $deviceNameDraft)
+                        .textFieldStyle(.roundedBorder)
+                }
 
-            LabeledContent("Auto-sleep after") {
-                HStack {
-                    TextField("", text: $maxIdleMinutesDraft)
+                LabeledContent("Auto-sleep after") {
+                    HStack {
+                        TextField("", text: $maxIdleMinutesDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 50)
+                        Text("minutes").foregroundStyle(.secondary).fixedSize()
+                    }
+                }
+
+                LabeledContent("Deep sleep every") {
+                    HStack {
+                        TextField("", text: $sleepDurationHoursDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 50)
+                        Text("hours").foregroundStyle(.secondary).fixedSize()
+                    }
+                }
+
+                LabeledContent("Wake sensitivity") {
+                    TextField("", text: $wakeSensitivityDraft)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 50)
-                    Text("minutes").foregroundStyle(.secondary).fixedSize()
                 }
             }
+            .disabled(asleep || !loaded)
 
-            LabeledContent("Deep sleep every") {
-                HStack {
-                    TextField("", text: $sleepDurationHoursDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 50)
-                    Text("hours").foregroundStyle(.secondary).fixedSize()
+            HStack {
+                Button("Update Device Settings") {
+                    Task {
+                        deviceUpdateMessage = nil
+                        await controller.updateDeviceSettings(
+                            name: deviceNameDraft.trimmingCharacters(in: .whitespaces).isEmpty ? nil : deviceNameDraft,
+                            sleepDurationSeconds: Int(sleepDurationHoursDraft).map { $0 * 3600 },
+                            maxIdleSeconds: Int(maxIdleMinutesDraft).map { $0 * 60 },
+                            wakeSensitivity: Int(wakeSensitivityDraft)
+                        )
+                        deviceUpdateFailed = controller.statusText.hasPrefix("Couldn't")
+                        deviceUpdateMessage = deviceUpdateFailed ? controller.statusText : "Saved to the frame."
+                        deviceNameDraft = controller.deviceName ?? ""
+                        maxIdleMinutesDraft = controller.maxIdleSeconds.map { String($0 / 60) } ?? ""
+                        sleepDurationHoursDraft = controller.sleepDurationSeconds.map { String($0 / 3600) } ?? ""
+                        wakeSensitivityDraft = controller.wakeSensitivity.map(String.init) ?? ""
+                    }
                 }
-            }
+                .disabled(asleep || !loaded || !deviceDraftsChanged || controller.isBusy)
 
-            LabeledContent("Wake sensitivity") {
-                TextField("", text: $wakeSensitivityDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 50)
-            }
-
-            Button("Update Device Settings") {
-                Task {
-                    await controller.updateDeviceSettings(
-                        name: deviceNameDraft.trimmingCharacters(in: .whitespaces).isEmpty ? nil : deviceNameDraft,
-                        sleepDurationSeconds: Int(sleepDurationHoursDraft).map { $0 * 3600 },
-                        maxIdleSeconds: Int(maxIdleMinutesDraft).map { $0 * 60 },
-                        wakeSensitivity: Int(wakeSensitivityDraft)
-                    )
-                    deviceNameDraft = controller.deviceName ?? ""
-                    maxIdleMinutesDraft = controller.maxIdleSeconds.map { String($0 / 60) } ?? ""
-                    sleepDurationHoursDraft = controller.sleepDurationSeconds.map { String($0 / 3600) } ?? ""
-                    wakeSensitivityDraft = controller.wakeSensitivity.map(String.init) ?? ""
+                if let deviceUpdateMessage {
+                    Label(deviceUpdateMessage, systemImage: deviceUpdateFailed ? "exclamationmark.triangle" : "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(deviceUpdateFailed ? Color.red : Color.green)
                 }
             }
         }
+    }
+
+    /// True when any device field differs from what the frame last reported.
+    private var deviceDraftsChanged: Bool {
+        deviceNameDraft != (controller.deviceName ?? "")
+            || maxIdleMinutesDraft != (controller.maxIdleSeconds.map { String($0 / 60) } ?? "")
+            || sleepDurationHoursDraft != (controller.sleepDurationSeconds.map { String($0 / 3600) } ?? "")
+            || wakeSensitivityDraft != (controller.wakeSensitivity.map(String.init) ?? "")
     }
 
     // MARK: - Automatic random photo
@@ -552,59 +614,231 @@ struct SettingsSheet: View {
         )
     }
 
-    // MARK: - Tabs
+    // MARK: - Privacy (one lock password, plus which galleries it hides)
 
-    @ViewBuilder
-    private var tabsSection: some View {
-        Text("Tabs group galleries and can require a password. Locked tabs stay hidden in the sidebar until unlocked with ⌘⇧L.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+    /// The single tab that holds every locked gallery. Locked galleries are
+    /// stored as one managed tab whose password is always the same as the
+    /// Local Folder/Favorites password, so the rest of the app's locking
+    /// logic (sidebar hiding, unlock prompts) works unchanged.
+    private static let lockedTabID = UUID(uuidString: "6F0B1E2A-5C1D-4B7E-9A31-2D4C8E7F5A10")!
 
-        ForEach(settings.tabs) { tab in
-            tabEditor(tab: tab)
-        }
+    private var lockedTabIndex: Int? {
+        settings.tabs.firstIndex { $0.id == Self.lockedTabID }
+    }
 
-        HStack {
-            TextField("New tab name", text: $newTabName)
-            Button("Add Tab") {
-                let trimmed = newTabName.trimmingCharacters(in: .whitespaces)
-                guard !trimmed.isEmpty else { return }
-                settings.tabs.append(GalleryTab(name: trimmed))
-                newTabName = ""
+    private func setLockedTabHash(_ hash: String?) {
+        if let hash {
+            if let index = lockedTabIndex {
+                settings.tabs[index].passwordHash = hash
+            } else {
+                settings.tabs.append(GalleryTab(id: Self.lockedTabID, name: "Locked", passwordHash: hash))
             }
-            .disabled(newTabName.trimmingCharacters(in: .whitespaces).isEmpty)
+        } else {
+            settings.tabs.removeAll { $0.id == Self.lockedTabID }
         }
     }
 
-    // MARK: - Local Folder / Favorites password
+    /// Older versions let each tab have its own password. Fold every locked
+    /// tab into the single managed one (galleries merged, password unified
+    /// with the Local Folder one) the first time Settings opens.
+    private func migrateLegacyLocks() {
+        let legacy = settings.tabs.filter { $0.isLocked && $0.id != Self.lockedTabID }
+        guard !legacy.isEmpty else { return }
+        let hash = settings.localFolderPasswordHash ?? legacy[0].passwordHash
+        guard let hash else { return }
+        if settings.localFolderPasswordHash == nil {
+            settings.localFolderPasswordHash = hash
+        }
+        settings.localFolderLocked = true
+        let merged = legacy.reduce(into: Set<String>()) { $0.formUnion($1.galleryNames) }
+        setLockedTabHash(hash)
+        if let index = lockedTabIndex {
+            settings.tabs[index].galleryNames.formUnion(merged)
+        }
+        let legacyIDs = Set(legacy.map(\.id))
+        settings.tabs.removeAll { legacyIDs.contains($0.id) }
+        for id in legacyIDs { controller.unlockedTabIDs.remove(id) }
+    }
 
-    /// One password protects both Local Folder and Favorites in this app —
-    /// they're really the same "your private local photos" concern, so
-    /// there's a single lock rather than two to manage separately. Apple
-    /// Photos deliberately isn't included: the user asked for it to stay
-    /// unlocked. Shares storage (settings.localFolderLocked/
-    /// localFolderPasswordHash) with the widget's own Local Folder lock, but
-    /// unlocking in one app doesn't unlock the other — see
-    /// PhotoController.isLocalFolderUnlocked.
+    private func passwordMatches(_ password: String) -> Bool {
+        guard let stored = settings.localFolderPasswordHash else { return false }
+        return PasswordHasher.verify(password, against: stored).matched
+    }
+
+    private func relockEverything() {
+        privacyUnlocked = false
+        controller.isLocalFolderUnlocked = false
+        controller.unlockedTabIDs.remove(Self.lockedTabID)
+    }
+
+    private func markUnlocked() {
+        privacyUnlocked = true
+        unlockFailed = false
+        unlockPasswordDraft = ""
+        // Deliberately does NOT unlock the sidebar: proving the password to
+        // edit settings shouldn't reveal the locked galleries in the main
+        // window.
+    }
+
+    private func attemptPrivacyUnlock() {
+        if passwordMatches(unlockPasswordDraft) {
+            markUnlocked()
+        } else {
+            unlockFailed = true
+        }
+    }
+
+    private func attemptPrivacyTouchID() async {
+        if await BiometricAuth.authenticate(reason: "manage locked galleries") {
+            markUnlocked()
+        }
+    }
+
+    private func setInitialPassword() {
+        guard !newPasswordDraft.isEmpty, newPasswordDraft == confirmPasswordDraft else { return }
+        let hash = PasswordHasher.hash(newPasswordDraft)
+        settings.localFolderPasswordHash = hash
+        settings.localFolderLocked = true
+        setLockedTabHash(hash)
+        newPasswordDraft = ""
+        confirmPasswordDraft = ""
+        privacyMessage = nil
+        privacyUnlocked = true // you just chose it; no need to type it again
+        controller.isLocalFolderUnlocked = false
+        controller.unlockedTabIDs.remove(Self.lockedTabID)
+    }
+
+    private func changePassword() {
+        guard passwordMatches(currentPasswordDraft) else {
+            privacyMessage = "Current password is incorrect."
+            return
+        }
+        guard !newPasswordDraft.isEmpty, newPasswordDraft == confirmPasswordDraft else {
+            privacyMessage = "New passwords don't match."
+            return
+        }
+        let hash = PasswordHasher.hash(newPasswordDraft)
+        settings.localFolderPasswordHash = hash
+        setLockedTabHash(hash)
+        currentPasswordDraft = ""
+        newPasswordDraft = ""
+        confirmPasswordDraft = ""
+        privacyMessage = "Password changed."
+    }
+
+    private func removePassword() {
+        guard passwordMatches(currentPasswordDraft) else {
+            privacyMessage = "Enter your current password to remove the lock."
+            return
+        }
+        settings.localFolderLocked = false
+        settings.localFolderPasswordHash = nil
+        setLockedTabHash(nil)
+        controller.isLocalFolderUnlocked = false
+        controller.unlockedTabIDs.remove(Self.lockedTabID)
+        currentPasswordDraft = ""
+        newPasswordDraft = ""
+        confirmPasswordDraft = ""
+        privacyMessage = nil
+        privacyUnlocked = false
+    }
+
+    private func lockedGalleryBinding(_ gallery: String) -> Binding<Bool> {
+        Binding(
+            get: { lockedTabIndex.map { settings.tabs[$0].galleryNames.contains(gallery) } ?? false },
+            set: { isLocked in
+                guard let index = lockedTabIndex else { return }
+                if isLocked {
+                    settings.tabs[index].galleryNames.insert(gallery)
+                } else {
+                    settings.tabs[index].galleryNames.remove(gallery)
+                }
+            }
+        )
+    }
+
     @ViewBuilder
-    private var localFolderPasswordSection: some View {
-        if settings.localFolderLocked {
-            Text("Local Folder and Favorites are locked behind this password in this app — unlock either from its lock icon in the sidebar.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            SecureField("New password", text: $newLocalFolderPassword)
-            HStack {
-                Button("Update Password") { setLocalFolderPassword() }
-                    .disabled(newLocalFolderPassword.isEmpty)
-                Button("Remove Password", role: .destructive) { removeLocalFolderPassword() }
+    private var privacySections: some View {
+        if !settings.localFolderLocked {
+            Section("Lock Password") {
+                Text("Set one password to hide chosen galleries, Local Folder and Favorites behind a lock.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SecureField("New password", text: $newPasswordDraft)
+                    .textFieldStyle(.roundedBorder)
+                SecureField("Confirm password", text: $confirmPasswordDraft)
+                    .textFieldStyle(.roundedBorder)
+                if !confirmPasswordDraft.isEmpty && newPasswordDraft != confirmPasswordDraft {
+                    Text("Passwords don't match.").font(.caption).foregroundStyle(.red)
+                }
+                Button("Set Password") { setInitialPassword() }
+                    .disabled(newPasswordDraft.isEmpty || newPasswordDraft != confirmPasswordDraft)
+            }
+        } else if !privacyUnlocked {
+            Section("Locked") {
+                Text("Enter your password to see or change what's locked.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if settings.useTouchIDForLocks && BiometricAuth.isAvailable() {
+                    Button {
+                        Task { await attemptPrivacyTouchID() }
+                    } label: {
+                        Label("Unlock with Touch ID", systemImage: "touchid")
+                    }
+                }
+                SecureField("Password", text: $unlockPasswordDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(attemptPrivacyUnlock)
+                if unlockFailed {
+                    Text("Incorrect password.").font(.caption).foregroundStyle(.red)
+                }
+                Button("Unlock") { attemptPrivacyUnlock() }
+                    .disabled(unlockPasswordDraft.isEmpty)
             }
         } else {
-            Text("Set a password to hide Local Folder and Favorites behind a lock icon in the sidebar.")
+            Section("Locked Galleries · \(activeProfileName)") {
+                Text("Ticked galleries are hidden in the sidebar until you unlock them (⌘⇧L, then your password). Local Folder and Favorites are always locked.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if controller.galleries.isEmpty {
+                    Text("No galleries loaded yet — wake the frame and press Refresh.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(controller.galleries, id: \.self) { name in
+                    Toggle(name, isOn: lockedGalleryBinding(name))
+                        .toggleStyle(.checkbox)
+                }
+                Button("Lock Now") { relockEverything() }
+            }
+
+            Section("Change or Remove Password") {
+                SecureField("Current password", text: $currentPasswordDraft)
+                    .textFieldStyle(.roundedBorder)
+                SecureField("New password", text: $newPasswordDraft)
+                    .textFieldStyle(.roundedBorder)
+                SecureField("Confirm new password", text: $confirmPasswordDraft)
+                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    Button("Change Password") { changePassword() }
+                        .disabled(currentPasswordDraft.isEmpty || newPasswordDraft.isEmpty)
+                    Button("Remove Password", role: .destructive) { removePassword() }
+                        .disabled(currentPasswordDraft.isEmpty)
+                }
+                if let privacyMessage {
+                    Text(privacyMessage).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+
+        Section("Touch ID") {
+            Toggle("Use Touch ID to unlock", isOn: $settings.useTouchIDForLocks)
+                .disabled(!BiometricAuth.isAvailable())
+            Text(BiometricAuth.isAvailable()
+                ? "Touch ID is tried first; the password still works as a fallback."
+                : "Touch ID isn't available on this Mac.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            SecureField("Set password", text: $newLocalFolderPassword)
-            Button("Set Password") { setLocalFolderPassword() }
-                .disabled(newLocalFolderPassword.isEmpty)
         }
     }
 
@@ -654,91 +888,6 @@ struct SettingsSheet: View {
         einkshotTokenDraft = ""
     }
 
-    private func setLocalFolderPassword() {
-        guard !newLocalFolderPassword.isEmpty else { return }
-        settings.localFolderPasswordHash = PasswordHasher.hash(newLocalFolderPassword)
-        settings.localFolderLocked = true
-        newLocalFolderPassword = ""
-        controller.isLocalFolderUnlocked = false // re-lock immediately under the new password
-    }
-
-    private func removeLocalFolderPassword() {
-        settings.localFolderLocked = false
-        settings.localFolderPasswordHash = nil
-        controller.isLocalFolderUnlocked = false
-    }
-
-    private func tabEditor(tab: GalleryTab) -> some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(controller.galleries, id: \.self) { name in
-                    Toggle(name, isOn: tabMembershipBinding(tab: tab, gallery: name))
-                        .toggleStyle(.checkbox)
-                        .font(.caption)
-                }
-            }
-
-            passwordEditor(tab: tab)
-
-            Button("Delete Tab", role: .destructive) { deleteTab(tab) }
-        } label: {
-            Label(tab.name, systemImage: tab.isLocked ? "lock.fill" : "folder")
-                .bold()
-        }
-    }
-
-    private func passwordEditor(tab: GalleryTab) -> some View {
-        HStack {
-            SecureField(tab.isLocked ? "New password" : "Set password", text: passwordDraftBinding(for: tab))
-            Button(tab.isLocked ? "Update" : "Lock") { setPassword(for: tab) }
-                .disabled((passwordDrafts[tab.id] ?? "").isEmpty)
-            if tab.isLocked {
-                Button("Unlock") { removePassword(for: tab) }
-            }
-        }
-    }
-
-    private func tabMembershipBinding(tab: GalleryTab, gallery: String) -> Binding<Bool> {
-        Binding(
-            get: { tab.galleryNames.contains(gallery) },
-            set: { isMember in
-                guard let index = settings.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
-                if isMember {
-                    settings.tabs[index].galleryNames.insert(gallery)
-                } else {
-                    settings.tabs[index].galleryNames.remove(gallery)
-                }
-            }
-        )
-    }
-
-    private func passwordDraftBinding(for tab: GalleryTab) -> Binding<String> {
-        Binding(
-            get: { passwordDrafts[tab.id] ?? "" },
-            set: { passwordDrafts[tab.id] = $0 }
-        )
-    }
-
-    private func setPassword(for tab: GalleryTab) {
-        guard let index = settings.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
-        let password = passwordDrafts[tab.id] ?? ""
-        guard !password.isEmpty else { return }
-        settings.tabs[index].passwordHash = PasswordHasher.hash(password)
-        passwordDrafts[tab.id] = ""
-        controller.unlockedTabIDs.remove(tab.id) // re-lock immediately under the new password
-    }
-
-    private func removePassword(for tab: GalleryTab) {
-        guard let index = settings.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
-        settings.tabs[index].passwordHash = nil
-        controller.unlockedTabIDs.remove(tab.id)
-    }
-
-    private func deleteTab(_ tab: GalleryTab) {
-        settings.tabs.removeAll { $0.id == tab.id }
-        controller.unlockedTabIDs.remove(tab.id)
-    }
-
     private func save() {
         commitDrafts()
         dismiss()
@@ -783,24 +932,28 @@ struct SettingsSheet: View {
 
 /// Sidebar groupings for the settings window.
 private enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
-    case frame = "Frame"
+    case frames = "Frames"
+    case connection = "Connection"
     case device = "Device"
     case photos = "Photos"
     case automation = "Automation"
-    case galleries = "Galleries & Privacy"
-    case online = "Online"
+    case galleries = "Privacy"
+    case remote = "Remote Push"
+    case content = "Content"
     case about = "About"
 
     var id: String { rawValue }
 
     var symbol: String {
         switch self {
-        case .frame: return "display"
+        case .frames: return "photo.on.rectangle.angled"
+        case .connection: return "wifi"
         case .device: return "slider.horizontal.3"
         case .photos: return "photo.on.rectangle"
         case .automation: return "clock.arrow.2.circlepath"
         case .galleries: return "lock"
-        case .online: return "globe"
+        case .remote: return "paperplane"
+        case .content: return "sparkles"
         case .about: return "info.circle"
         }
     }
