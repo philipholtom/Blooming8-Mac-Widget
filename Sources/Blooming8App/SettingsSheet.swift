@@ -60,37 +60,39 @@ struct SettingsSheet: View {
                 Section("Frame Profiles") {
                     frameProfilesSection
                 }
-                Section("Frame") {
+                Section("Frame · \(activeProfileName)") {
                     TextField("IP address", text: $ipDraft, prompt: Text("192.168.1.42"))
                     HStack {
                         TextField("Bluetooth name", text: $bleNameDraft, prompt: Text("Office"))
                         Button("Scan\u{2026}") { showConnectCanvas = true }
                     }
-                    Text("The Bluetooth name is used to wake the frame when it's asleep and stops answering over Wi-Fi.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Picker("Orientation", selection: $settings.frameOrientation) {
-                        ForEach(FrameOrientation.allCases) { orientation in
-                            Text(orientation.label).tag(orientation)
-                        }
-                    }
-                    Text("How this frame is physically mounted — the frame itself always reports the same panel size either way, so this can't be detected automatically. Everything sent to the frame is composed for this orientation.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Section("Device") {
-                    deviceSettingsSection
-                }
-                    case .photos:
-                Section("Photos") {
-                    Toggle("Crop landscape photos to fill the frame", isOn: $settings.cropLandscapePhotos)
-                    Text("Off: a landscape photo shows in full, with black bars above and below. On: it's cropped and centered to fill the whole screen instead. Portrait photos aren't affected.")
+                    Text("The Bluetooth name is used to wake the frame when it stops answering over Wi-Fi.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
                     HStack {
+                        Picker("Orientation", selection: $settings.frameOrientation) {
+                            ForEach(FrameOrientation.allCases) { orientation in
+                                Text(orientation.label).tag(orientation)
+                            }
+                        }
+                        InfoButton("How this frame is physically mounted. The frame reports the same panel size either way, so this can't be detected — everything sent is composed for this orientation.")
+                    }
+                }
+                    case .device:
+                Section("Device · \(activeProfileName)") {
+                    deviceSettingsSection
+                }
+                    case .photos:
+                Section("Photos") {
+                    HStack {
+                        Toggle("Crop landscape photos to fill the frame", isOn: $settings.cropLandscapePhotos)
+                        InfoButton("Off: a landscape photo shows in full, with black bars above and below. On: it's cropped and centered to fill the screen. Portrait photos aren't affected.")
+                    }
+
+                    HStack {
                         Text("Thumbnail cache")
+                        InfoButton("Downloaded gallery thumbnails are kept on disk so revisiting a gallery is fast. Clearing frees the space — nothing is deleted from the frame.")
                         Spacer()
                         Text(thumbnailCacheSizeText)
                             .foregroundStyle(.secondary)
@@ -102,9 +104,6 @@ struct SettingsSheet: View {
                         }
                         .disabled(thumbnailCacheSizeBytes == 0)
                     }
-                    Text("Gallery thumbnails already downloaded from the frame are kept on disk so browsing a gallery you've visited before doesn't re-fetch every photo. Clearing this just frees the space — nothing is deleted from the frame.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 Section("Local Folder") {
                     HStack {
@@ -122,14 +121,14 @@ struct SettingsSheet: View {
                     }
                 }
                     case .automation:
-                Section("Automatic Random Photo") {
+                Section("Automatic Random Photo · \(activeProfileName)") {
                     autoRandomSection
                 }
-                Section("Scheduled Send") {
+                Section("Scheduled Send · \(activeProfileName)") {
                     scheduledSendSection
                 }
                     case .galleries:
-                Section("Tabs") {
+                Section("Tabs · \(activeProfileName)") {
                     tabsSection
                 }
                 Section("Local Folder & Favorites Password") {
@@ -159,7 +158,7 @@ struct SettingsSheet: View {
                             }
                         }
                     }
-                    Text("Lets Send Remotely push a photo to the frame over the internet, not just your home network. Get a token from the Bloomin8 phone app: Devices tab → device card → ⋮ menu → API Token.")
+                    Text("For Send Remotely. Get a token in the Bloomin8 phone app: Devices → device card → ⋮ → API Token.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -169,6 +168,9 @@ struct SettingsSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    Text("Weather location: type a town or city and click Look Up, or edit the coordinates.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     HStack {
                         TextField("Weather location name", text: $weatherLocationNameDraft)
                             .textFieldStyle(.roundedBorder)
@@ -202,7 +204,7 @@ struct SettingsSheet: View {
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
-                    LabeledContent("Coordinates") {
+                    DisclosureGroup("Coordinates: \(weatherLatitudeDraft), \(weatherLongitudeDraft)") {
                         HStack {
                             TextField("Latitude", text: $weatherLatitudeDraft)
                                 .textFieldStyle(.roundedBorder)
@@ -210,14 +212,15 @@ struct SettingsSheet: View {
                                 .textFieldStyle(.roundedBorder)
                         }
                     }
-                    Text("Type a town or city and click Look Up, or enter coordinates directly below.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
 
                     TextField("History highlight year", text: $historyHighlightYearDraft, prompt: Text("1979"))
                     Text("If today has a historical event from this year, it's always shown first.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                    case .about:
+                Section("About") {
+                    aboutSection
                 }
                     }
                 }
@@ -228,10 +231,9 @@ struct SettingsSheet: View {
 
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Save") { save() }
+                Button("Done") { save() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(ipDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .keyboardShortcut(.defaultAction)
             }
             .padding(16)
         }
@@ -249,6 +251,11 @@ struct SettingsSheet: View {
                 settings.scheduledSend?.devicePath = devicePath
             }
         }
+        // Everything applies as you change it: toggles and pickers write
+        // straight to settings, and typed fields are committed when you
+        // switch category, press Done, or close the window.
+        .onChange(of: category) { _ in commitDrafts() }
+        .onDisappear { commitDrafts() }
         .onAppear {
             syncFrameDraftsFromActiveProfile()
             nasaKeyDraft = settings.nasaApiKey
@@ -264,7 +271,7 @@ struct SettingsSheet: View {
 
     @ViewBuilder
     private var frameProfilesSection: some View {
-        Text("Each profile remembers its own IP address, orientation, galleries, tabs, favorites, and schedules — everything below in \"Frame\" and further down applies to whichever one is active.")
+        Text("Each profile has its own IP, orientation, tabs, favorites and schedules. Sections marked with the profile name apply to the active one.")
             .font(.caption)
             .foregroundStyle(.secondary)
 
@@ -373,19 +380,19 @@ struct SettingsSheet: View {
 
             LabeledContent("Auto-sleep after") {
                 HStack {
-                    TextField("min", text: $maxIdleMinutesDraft)
+                    TextField("", text: $maxIdleMinutesDraft)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 50)
-                    Text("min").foregroundStyle(.secondary)
+                    Text("minutes").foregroundStyle(.secondary).fixedSize()
                 }
             }
 
             LabeledContent("Deep sleep every") {
                 HStack {
-                    TextField("hrs", text: $sleepDurationHoursDraft)
+                    TextField("", text: $sleepDurationHoursDraft)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 50)
-                    Text("hours").foregroundStyle(.secondary)
+                    Text("hours").foregroundStyle(.secondary).fixedSize()
                 }
             }
 
@@ -549,7 +556,7 @@ struct SettingsSheet: View {
 
     @ViewBuilder
     private var tabsSection: some View {
-        Text("Tabs group galleries and can optionally require a password to view. Locking a tab here also hides it from this app's sidebar until unlocked with ⌘⇧L.")
+        Text("Tabs group galleries and can require a password. Locked tabs stay hidden in the sidebar until unlocked with ⌘⇧L.")
             .font(.caption)
             .foregroundStyle(.secondary)
 
@@ -662,18 +669,7 @@ struct SettingsSheet: View {
     }
 
     private func tabEditor(tab: GalleryTab) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(tab.name).bold()
-                Spacer()
-                Button(role: .destructive) {
-                    deleteTab(tab)
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.plain)
-            }
-
+        DisclosureGroup {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(controller.galleries, id: \.self) { name in
                     Toggle(name, isOn: tabMembershipBinding(tab: tab, gallery: name))
@@ -683,9 +679,12 @@ struct SettingsSheet: View {
             }
 
             passwordEditor(tab: tab)
-            Divider()
+
+            Button("Delete Tab", role: .destructive) { deleteTab(tab) }
+        } label: {
+            Label(tab.name, systemImage: tab.isLocked ? "lock.fill" : "folder")
+                .bold()
         }
-        .padding(.vertical, 2)
     }
 
     private func passwordEditor(tab: GalleryTab) -> some View {
@@ -741,7 +740,36 @@ struct SettingsSheet: View {
     }
 
     private func save() {
-        settings.deviceIP = ipDraft.trimmingCharacters(in: .whitespaces)
+        commitDrafts()
+        dismiss()
+        Task {
+            await controller.refreshCurrentPhoto()
+            await controller.loadGalleries()
+        }
+    }
+
+    private var activeProfileName: String {
+        settings.frameProfiles.first(where: { $0.id == settings.activeFrameProfileID })?.name ?? "Frame"
+    }
+
+    private var aboutSection: some View {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return Group {
+            LabeledContent("Version", value: "\(version) (\(build))")
+            LabeledContent("Active frame", value: activeProfileName)
+            LabeledContent("Frame name", value: controller.deviceName ?? "Not connected")
+            LabeledContent("IP address", value: settings.deviceIP.isEmpty ? "Not set" : settings.deviceIP)
+            if let battery = controller.batteryPercent {
+                LabeledContent("Battery", value: "\(battery)%")
+            }
+        }
+    }
+
+    private func commitDrafts() {
+        let ip = ipDraft.trimmingCharacters(in: .whitespaces)
+        if !ip.isEmpty { settings.deviceIP = ip }
         settings.bleDeviceName = bleNameDraft.trimmingCharacters(in: .whitespaces)
         let key = nasaKeyDraft.trimmingCharacters(in: .whitespaces)
         settings.nasaApiKey = key.isEmpty ? "DEMO_KEY" : key
@@ -749,11 +777,6 @@ struct SettingsSheet: View {
         if let lat = Double(weatherLatitudeDraft) { settings.weatherLatitude = lat }
         if let lon = Double(weatherLongitudeDraft) { settings.weatherLongitude = lon }
         if let year = Int(historyHighlightYearDraft) { settings.historyHighlightYear = year }
-        dismiss()
-        Task {
-            await controller.refreshCurrentPhoto()
-            await controller.loadGalleries()
-        }
     }
 }
 
@@ -761,20 +784,48 @@ struct SettingsSheet: View {
 /// Sidebar groupings for the settings window.
 private enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
     case frame = "Frame"
+    case device = "Device"
     case photos = "Photos"
     case automation = "Automation"
     case galleries = "Galleries & Privacy"
     case online = "Online"
+    case about = "About"
 
     var id: String { rawValue }
 
     var symbol: String {
         switch self {
         case .frame: return "display"
+        case .device: return "slider.horizontal.3"
         case .photos: return "photo.on.rectangle"
         case .automation: return "clock.arrow.2.circlepath"
         case .galleries: return "lock"
         case .online: return "globe"
+        case .about: return "info.circle"
+        }
+    }
+}
+
+
+/// A small (?) button that shows longer explanatory text in a popover, so
+/// settings rows stay one line.
+private struct InfoButton: View {
+    let text: String
+    @State private var shown = false
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Button { shown.toggle() } label: {
+            Image(systemName: "questionmark.circle")
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .popover(isPresented: $shown) {
+            Text(text)
+                .font(.callout)
+                .frame(width: 260, alignment: .leading)
+                .padding(12)
         }
     }
 }
