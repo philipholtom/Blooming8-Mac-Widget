@@ -14,6 +14,7 @@ struct RootView: View {
     @State private var source: LibrarySource? = .currentPhoto
     @State private var showSettings = false
     @State private var showLogs = false
+    @State private var showActivity = false
     @State private var showSendRemotely = false
     @State private var thumbnailSize: Double = 150
     @State private var showDeleteGalleryConfirm = false
@@ -84,6 +85,9 @@ struct RootView: View {
         .sheet(isPresented: $showLogs) {
             DeviceLogsView(settings: settings)
         }
+        .sheet(isPresented: $showActivity) {
+            ActivitySheet(controller: controller)
+        }
         .sheet(isPresented: $showSendRemotely) {
             SendRemotelyView(settings: settings, controller: controller)
         }
@@ -115,7 +119,7 @@ struct RootView: View {
     }
 
     private func isLocalFolderSource(_ source: LibrarySource) -> Bool {
-        source == .localFolder || source == .favorites
+        source == .localFolder || source == .browseFiles || source == .favorites
     }
 
     private var isLocalFolderSource: Bool { isLocalFolderSource(activeSource) }
@@ -127,6 +131,8 @@ struct RootView: View {
             CurrentPhotoPane(controller: controller, settings: settings)
         case .generated:
             GeneratedPane(settings: settings, controller: controller)
+        case .browseFiles:
+            FileBrowserView(settings: settings, controller: controller)
         default:
             HSplitView {
                 LibraryGrid(
@@ -238,6 +244,21 @@ struct RootView: View {
                 ToolbarLabel(title: "Logs", systemImage: "doc.text.magnifyingglass")
             }
             .help("View and download the frame's own diagnostic logs")
+
+            Button {
+                showActivity = true
+            } label: {
+                ZStack(alignment: .topTrailing) {
+                    ToolbarLabel(title: "Activity", systemImage: "clock.arrow.circlepath")
+                    if controller.hasUnseenActivityFailure {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 7, height: 7)
+                            .offset(x: 2, y: -2)
+                    }
+                }
+            }
+            .help("What this app has tried to do to the frame recently, and whether it worked")
 
             Button {
                 showSendRemotely = true

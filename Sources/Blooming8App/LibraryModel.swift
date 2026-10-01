@@ -8,6 +8,7 @@ import os
 enum LibrarySource: Hashable {
     case currentPhoto
     case localFolder
+    case browseFiles
     case favorites
     case applePhotos
     case generated
@@ -17,6 +18,7 @@ enum LibrarySource: Hashable {
         switch self {
         case .currentPhoto: return "On the Frame"
         case .localFolder: return "Local Folder"
+        case .browseFiles: return "Browse Files"
         case .favorites: return "Favorites"
         case .applePhotos: return "Apple Photos"
         case .generated: return "Generated"
@@ -28,6 +30,7 @@ enum LibrarySource: Hashable {
         switch self {
         case .currentPhoto: return "photo.on.rectangle.angled"
         case .localFolder: return "folder"
+        case .browseFiles: return "folder.fill"
         case .favorites: return "star"
         case .applePhotos: return "photo.on.rectangle"
         case .generated: return "sparkles"
@@ -166,7 +169,9 @@ final class LibraryModel: ObservableObject {
         loadError = nil
 
         switch source {
-        case .currentPhoto, .generated:
+        case .currentPhoto, .generated, .browseFiles:
+            // .browseFiles has its own view (FileBrowserView) with its own
+            // folder-navigation state — it never routes through this grid.
             items = []
             isLoading = false
 

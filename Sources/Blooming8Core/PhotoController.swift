@@ -51,6 +51,13 @@ public final class PhotoController: ObservableObject {
     /// Whether the frame answered the last reachability check — nil means no
     /// device IP is set yet, or the first check hasn't completed.
     @Published public var isDeviceAwake: Bool?
+    /// Most-recent-first log of upload/show/delete/device-setting/scheduled-
+    /// send/keep-awake outcomes, for the toolbar Activity sheet — see
+    /// ActivityEvent.swift.
+    @Published public var recentActivity: [ActivityEvent] = []
+    /// True once a failure has landed in `recentActivity` that the Activity
+    /// sheet hasn't been opened to see yet; cleared when it's opened.
+    @Published public var hasUnseenActivityFailure: Bool = false
 
     /// Keeps the frame from idling into sleep by calling its `/whistle`
     /// keep-alive on a timer while on. Deliberately runtime-only (never
@@ -168,6 +175,7 @@ public final class PhotoController: ObservableObject {
         } catch {
             guard generation == keepAwakeGeneration else { return }
             statusText = "Couldn't keep the frame awake: \(error.localizedDescription)"
+            logActivity("Keep Awake: couldn't reach the frame — \(error.localizedDescription)", success: false)
             keepAwake = false
             return
         }
@@ -188,6 +196,7 @@ public final class PhotoController: ObservableObject {
         guard generation == keepAwakeGeneration, keepAwake else { return }
         if let battery = batteryPercent, battery <= Self.keepAwakeMinimumBattery {
             statusText = "Stopped keeping the frame awake: its battery is at \(battery)%."
+            logActivity("Keep Awake: stopped — battery at \(battery)%.", success: true)
             keepAwake = false
             return
         }
@@ -198,6 +207,7 @@ public final class PhotoController: ObservableObject {
             keepAwakeFailures += 1
             if keepAwakeFailures >= 3 {
                 statusText = "Stopped keeping the frame awake: it stopped responding."
+                logActivity("Keep Awake: stopped — the frame stopped responding.", success: false)
                 keepAwake = false
                 return
             }
@@ -397,9 +407,11 @@ public final class PhotoController: ObservableObject {
             }
             let failedSuffix = failed > 0 ? " (\(failed) failed)" : ""
             statusText = "Uploaded \(uploaded) of \(urls.count) photo\(urls.count == 1 ? "" : "s") to '\(trimmedGallery)'\(failedSuffix)."
+            logActivity("Uploaded \(uploaded) of \(urls.count) photo\(urls.count == 1 ? "" : "s") to '\(trimmedGallery)'\(failedSuffix)", success: failed == 0)
             await loadGalleries()
         } catch {
             statusText = "Couldn't upload: \(error.localizedDescription)"
+            logActivity("Couldn't upload to '\(trimmedGallery)': \(error.localizedDescription)", success: false)
         }
     }
 
@@ -438,8 +450,10 @@ public final class PhotoController: ObservableObject {
             }
             let failedSuffix = failed > 0 ? " (\(failed) failed)" : ""
             statusText = "Downloaded \(downloaded) of \(names.count) photo\(names.count == 1 ? "" : "s") to \(destination.path)\(failedSuffix)."
+            logActivity("Downloaded \(downloaded) of \(names.count) photo\(names.count == 1 ? "" : "s") from '\(gallery)'\(failedSuffix)", success: downloaded == names.count)
         } catch {
             statusText = "Couldn't download: \(error.localizedDescription)"
+            logActivity("Couldn't download '\(gallery)': \(error.localizedDescription)", success: false)
         }
     }
 
@@ -591,6 +605,7 @@ public final class PhotoController: ObservableObject {
             statusText = "✓ Redisplayed"
         } catch {
             statusText = "✗ Redisplay failed: \(error.localizedDescription)"
+            logActivity("Redisplay failed: \(error.localizedDescription)", success: false)
         }
     }
 
@@ -614,6 +629,7 @@ public final class PhotoController: ObservableObject {
             statusText = "Showed next image."
         } catch {
             statusText = "Couldn't show next image: \(error.localizedDescription)"
+            logActivity("Couldn't show next image: \(error.localizedDescription)", success: false)
         }
     }
 
@@ -631,8 +647,10 @@ public final class PhotoController: ObservableObject {
             }
             currentGalleryOnDevice = gallery
             statusText = "Started slideshow of '\(gallery)' every \(durationSeconds / 60) min."
+            logActivity("Started slideshow of '\(gallery)'", success: true)
         } catch {
             statusText = "Couldn't start slideshow: \(error.localizedDescription)"
+            logActivity("Couldn't start slideshow of '\(gallery)': \(error.localizedDescription)", success: false)
         }
     }
 
@@ -645,6 +663,7 @@ public final class PhotoController: ObservableObject {
             statusText = "Stopped slideshow."
         } catch {
             statusText = "Couldn't stop slideshow: \(error.localizedDescription)"
+            logActivity("Couldn't stop slideshow: \(error.localizedDescription)", success: false)
         }
     }
 
@@ -667,8 +686,10 @@ public final class PhotoController: ObservableObject {
             let info = try await client.fetchDeviceInfo(ip: settings.deviceIP)
             applyDeviceInfo(info)
             statusText = "Device settings updated."
+            logActivity("Device settings updated", success: true)
         } catch {
             statusText = "Couldn't update device settings: \(error.localizedDescription)"
+            logActivity("Couldn't update device settings: \(error.localizedDescription)", success: false)
         }
     }
 
@@ -714,6 +735,7 @@ public final class PhotoController: ObservableObject {
             }
         } catch {
             statusText = "✗ Couldn't display that image: \(error.localizedDescription)"
+            logActivity("Couldn't display \((path as NSString).lastPathComponent): \(error.localizedDescription)", success: false)
         }
     }
 
@@ -730,6 +752,7 @@ public final class PhotoController: ObservableObject {
             return true
         } catch {
             statusText = "✗ Couldn't delete \(filename): \(error.localizedDescription)"
+            logActivity("Couldn't delete \(filename) from '\(gallery)': \(error.localizedDescription)", success: false)
             return false
         }
     }
@@ -754,6 +777,7 @@ public final class PhotoController: ObservableObject {
             return true
         } catch {
             statusText = "✗ Couldn't move \(filename): \(error.localizedDescription)"
+            logActivity("Couldn't move \(filename) from '\(sourceGallery)' to '\(destinationGallery)': \(error.localizedDescription)", success: false)
             return false
         }
     }
@@ -826,6 +850,7 @@ public final class PhotoController: ObservableObject {
             }
         } catch {
             statusText = "Couldn't show a random photo: \(error.localizedDescription)"
+            logActivity("Couldn't show a random photo: \(error.localizedDescription)", success: false)
         }
     }
 
@@ -914,6 +939,7 @@ public final class PhotoController: ObservableObject {
             statusText = ""
         } catch {
             statusText = "Couldn't pick random photos: \(error.localizedDescription)"
+            logActivity("Couldn't pick random photos: \(error.localizedDescription)", success: false)
         }
     }
 
@@ -956,11 +982,13 @@ public final class PhotoController: ObservableObject {
             setCurrentImagePath(path)
             currentGalleryOnDevice = source.galleryName
             statusText = "Showed \(source.displayName)."
+            logActivity("Showed \(source.displayName)", success: true)
 
             // Pick up the source's gallery in the picker in case it's new.
             await loadGalleries()
         } catch {
             statusText = "Couldn't generate \(source.displayName): \(error.localizedDescription)"
+            logActivity("Couldn't generate \(source.displayName): \(error.localizedDescription)", success: false)
         }
     }
 
@@ -1078,6 +1106,19 @@ public final class PhotoController: ObservableObject {
             return
         }
         let folderURL = URL(fileURLWithPath: folderPath, isDirectory: true)
+        let allImages = ImageFolder.enumerateImages(in: folderURL)
+        guard allImages.count >= 1 else {
+            statusText = "No photos found in '\(folderURL.lastPathComponent)'."
+            return
+        }
+        renderRandomCandidates(from: allImages, unreadableMessage: "Couldn't read any photos from '\(folderURL.lastPathComponent)'.")
+    }
+
+    /// Same 3-candidate preview as `prepareLocalFolderCandidate`, but drawn
+    /// recursively from an arbitrary folder — the Browse Files tab's "Random
+    /// from Here", which can be any subfolder you've navigated into rather
+    /// than only the one fixed Local Folder path.
+    public func prepareCandidate(fromFolder folderURL: URL) {
         let allImages = ImageFolder.enumerateImages(in: folderURL)
         guard allImages.count >= 1 else {
             statusText = "No photos found in '\(folderURL.lastPathComponent)'."
@@ -1384,6 +1425,7 @@ public final class PhotoController: ObservableObject {
                         currentLocalSourceURL = candidate.isLocalFile ? candidate.fileURL : nil
                         currentGalleryOnDevice = gallery
                         statusText = "✓ Already on the frame — displayed \(filename) without uploading again"
+                        logActivity("Displayed \(filename) — already on the frame", success: true)
                         localFolderCandidates = []
                         return
                     } catch {
@@ -1415,11 +1457,13 @@ public final class PhotoController: ObservableObject {
             currentLocalSourceURL = candidate.isLocalFile ? candidate.fileURL : nil
             currentGalleryOnDevice = gallery
             statusText = "← /upload OK\n✓ Displayed \(filename)"
+            logActivity("Uploaded and displayed \(filename)", success: true)
 
             localFolderCandidates = []
             await loadGalleries()
         } catch {
             statusText = "✗ Upload error: \(error.localizedDescription)\n(File: \(candidate.fileURL.lastPathComponent))"
+            logActivity("Couldn't upload \(candidate.fileURL.lastPathComponent): \(error.localizedDescription)", success: false)
         }
     }
 
@@ -1466,9 +1510,11 @@ public final class PhotoController: ObservableObject {
             statusText = "← /gallery OK"
 
             statusText = "✓ Deleted Random gallery"
+            logActivity("Deleted the Random gallery", success: true)
             await loadGalleries()
         } catch {
             statusText = "✗ \(error.localizedDescription)"
+            logActivity("Couldn't delete the Random gallery: \(error.localizedDescription)", success: false)
         }
     }
 
@@ -1505,9 +1551,9 @@ public final class PhotoController: ObservableObject {
             }
         }
 
-        statusText = galleries.contains(trimmed)
-            ? "✓ Created '\(trimmed)'"
-            : "✗ Couldn't create '\(trimmed)'"
+        let created = galleries.contains(trimmed)
+        statusText = created ? "✓ Created '\(trimmed)'" : "✗ Couldn't create '\(trimmed)'"
+        logActivity(created ? "Created gallery '\(trimmed)'" : "Couldn't create gallery '\(trimmed)'", success: created)
     }
 
     /// Deletes an entire gallery and all its images from the device, and
@@ -1526,8 +1572,10 @@ public final class PhotoController: ObservableObject {
             }
             await loadGalleries()
             statusText = "✓ Deleted '\(name)'"
+            logActivity("Deleted gallery '\(name)'", success: true)
         } catch {
             statusText = "✗ Couldn't delete '\(name)': \(error.localizedDescription)"
+            logActivity("Couldn't delete gallery '\(name)': \(error.localizedDescription)", success: false)
         }
     }
 

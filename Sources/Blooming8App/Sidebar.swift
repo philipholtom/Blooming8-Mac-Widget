@@ -36,6 +36,7 @@ struct Sidebar: View {
                     sectionHeader("Library")
                     if shouldShowLocalFolderRows {
                         row(.localFolder, isLocked: isLocalFolderLocked)
+                        row(.browseFiles, isLocked: isLocalFolderLocked)
                         row(.favorites, badge: settings.favoriteImagePaths.count, isLocked: isLocalFolderLocked)
                     }
                     row(.applePhotos)

@@ -15,11 +15,15 @@ struct LocalFolderCandidatePickerSheet: View {
     enum Source {
         case localFolder
         case favorites
+        /// Random from Here, in the Browse Files tab — recursive from
+        /// whatever folder was being browsed, not the fixed Local Folder path.
+        case folder(URL)
 
         var title: String {
             switch self {
             case .localFolder: return "Random from Local Folder"
             case .favorites: return "Random from Favourites"
+            case .folder(let url): return "Random from '\(url.lastPathComponent)'"
             }
         }
     }
@@ -212,6 +216,7 @@ struct LocalFolderCandidatePickerSheet: View {
         switch source {
         case .localFolder: controller.prepareLocalFolderCandidate()
         case .favorites: controller.prepareFavoritesCandidate()
+        case .folder(let url): controller.prepareCandidate(fromFolder: url)
         }
         let deadline = Date().addingTimeInterval(15)
         while controller.localFolderCandidates.isEmpty && Date() < deadline {

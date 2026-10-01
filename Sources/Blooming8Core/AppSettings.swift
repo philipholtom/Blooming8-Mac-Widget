@@ -311,6 +311,16 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(randomFolderPath, forKey: "randomFolderPath") }
     }
 
+    /// The folder the Browse Files tab currently has open — remembered
+    /// between launches, but independent of `randomFolderPath`: Browse Files
+    /// lets you navigate to (and reopen) any folder on this Mac, not just the
+    /// one configured for Local Folder/Favorites/auto-random. Empty means
+    /// "fall back to randomFolderPath", so it still has somewhere sensible to
+    /// start the first time.
+    @Published public var browseFilesRootPath: String {
+        didSet { defaults.set(browseFilesRootPath, forKey: "browseFilesRootPath") }
+    }
+
     /// Whether the Local Folder tab is password protected. Mac-wide for the
     /// same reason as `randomFolderPath` above.
     @Published public var localFolderLocked: Bool {
@@ -417,6 +427,7 @@ public final class AppSettings: ObservableObject {
         historyHighlightYear = defaults.object(forKey: "historyHighlightYear") != nil
             ? defaults.integer(forKey: "historyHighlightYear") : 1979
         randomFolderPath = defaults.string(forKey: "randomFolderPath") ?? ""
+        browseFilesRootPath = defaults.string(forKey: "browseFilesRootPath") ?? ""
         localFolderLocked = defaults.bool(forKey: "localFolderLocked")
         if let fromKeychain = KeychainStore.read(account: Self.localFolderPasswordAccount) {
             Self.log.notice("localFolderPasswordHash: read from Keychain")
