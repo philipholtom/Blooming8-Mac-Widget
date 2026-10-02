@@ -9,7 +9,9 @@ struct RootView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var controller: PhotoController
     @ObservedObject var scheduledSendManager: ScheduledSendManager
+    @ObservedObject var scheduledContentManager: ScheduledContentManager
     @StateObject private var library: LibraryModel
+    @ObservedObject private var incoming = IncomingFiles.shared
 
     @State private var source: LibrarySource? = .currentPhoto
     @State private var showSettings = false
@@ -19,10 +21,11 @@ struct RootView: View {
     @State private var thumbnailSize: Double = 150
     @State private var showDeleteGalleryConfirm = false
 
-    init(settings: AppSettings, controller: PhotoController, scheduledSendManager: ScheduledSendManager) {
+    init(settings: AppSettings, controller: PhotoController, scheduledSendManager: ScheduledSendManager, scheduledContentManager: ScheduledContentManager) {
         self.settings = settings
         self.controller = controller
         self.scheduledSendManager = scheduledSendManager
+        self.scheduledContentManager = scheduledContentManager
         _library = StateObject(wrappedValue: LibraryModel(settings: settings, controller: controller))
     }
 
@@ -80,13 +83,16 @@ struct RootView: View {
             if activeSource == .favorites { library.load(.favorites) }
         }
         .sheet(isPresented: $showSettings) {
-            SettingsSheet(settings: settings, controller: controller, scheduledSendManager: scheduledSendManager)
+            SettingsSheet(settings: settings, controller: controller, scheduledSendManager: scheduledSendManager, scheduledContentManager: scheduledContentManager)
         }
         .sheet(isPresented: $showLogs) {
             DeviceLogsView(settings: settings)
         }
         .sheet(isPresented: $showActivity) {
             ActivitySheet(controller: controller)
+        }
+        .sheet(isPresented: Binding(get: { !incoming.urls.isEmpty }, set: { if !$0 { incoming.urls = [] } })) {
+            IncomingFilesSheet(urls: incoming.urls, controller: controller, settings: settings)
         }
         .sheet(isPresented: $showSendRemotely) {
             SendRemotelyView(settings: settings, controller: controller)

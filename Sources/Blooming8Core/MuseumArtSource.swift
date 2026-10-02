@@ -17,6 +17,7 @@ public struct MuseumArtSource: ContentSource {
     private let height = 1600
 
     private struct SearchResponse: Decodable {
+        let total: Int?
         let objectIDs: [Int]?
     }
 
@@ -27,20 +28,41 @@ public struct MuseumArtSource: ContentSource {
         let isPublicDomain: Bool
     }
 
+    /// The Met retired `/v1/search` on 2026-10-01 (it now answers 410 Gone).
+    /// `/v1.1/search` is paginated by `offset`/`limit` and can't page past
+    /// 10,000 results, so a random page is picked inside that window.
+    private static let pageSize = 50
+    private static let maxPagingWindow = 10_000
+
+    private func searchPage(query: String, offset: Int) async throws -> SearchResponse {
+        var components = URLComponents(string: "https://collectionapi.metmuseum.org/public/collection/v1.1/search")!
+        components.queryItems = [
+            URLQueryItem(name: "hasImages", value: "true"),
+            URLQueryItem(name: "isPublicDomain", value: "true"),
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(Self.pageSize)),
+            URLQueryItem(name: "offset", value: String(offset))
+        ]
+        let (data, response) = try await URLSession.shared.data(from: components.url!)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw ContentSourceError.message("Met Museum search returned an error")
+        }
+        return try JSONDecoder().decode(SearchResponse.self, from: data)
+    }
+
     public func generateImage(settings: AppSettings) async throws -> Data {
         // A handful of broad, reliably-populated query terms — the search
         // endpoint requires some query, there's no "browse everything".
         let query = ["painting", "landscape", "portrait", "still life", "watercolor"].randomElement() ?? "painting"
-        var searchComponents = URLComponents(string: "https://collectionapi.metmuseum.org/public/collection/v1/search")!
-        searchComponents.queryItems = [
-            URLQueryItem(name: "hasImages", value: "true"),
-            URLQueryItem(name: "q", value: query)
-        ]
-        let (searchData, searchResponse) = try await URLSession.shared.data(from: searchComponents.url!)
-        guard let http = searchResponse as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw ContentSourceError.message("Met Museum search returned an error")
+
+        // Guess a random page; if that's past the end of a smaller result
+        // set, the response still reports `total`, so retry inside it.
+        let firstGuess = try await searchPage(query: query, offset: Int.random(in: 0..<(Self.maxPagingWindow - Self.pageSize)))
+        var ids = firstGuess.objectIDs ?? []
+        if ids.isEmpty, let total = firstGuess.total, total > 0 {
+            let upper = max(1, min(total, Self.maxPagingWindow) - Self.pageSize)
+            ids = try await searchPage(query: query, offset: Int.random(in: 0..<upper)).objectIDs ?? []
         }
-        let ids = try JSONDecoder().decode(SearchResponse.self, from: searchData).objectIDs ?? []
         guard !ids.isEmpty else {
             throw ContentSourceError.message("No Met Museum results for '\(query)'")
         }

@@ -88,14 +88,20 @@ final class ScheduledSendManager: ObservableObject {
     /// week ahead, so a single selected day still resolves correctly once
     /// that day's time has already passed this week.
     static func nextFireDate(for schedule: ScheduledSend, after: Date) -> Date? {
+        nextFireDate(days: schedule.days, timeMinutes: schedule.timeMinutes, after: after)
+    }
+
+    /// The same calculation for any "these days at this time" schedule —
+    /// shared with `ScheduledContentManager`.
+    static func nextFireDate(days: Set<Weekday>, timeMinutes: Int, after: Date) -> Date? {
         let calendar = Calendar.current
         for offset in 0...7 {
             guard let candidateDay = calendar.date(byAdding: .day, value: offset, to: after) else { continue }
             let weekdayRaw = calendar.component(.weekday, from: candidateDay)
-            guard let weekday = Weekday(rawValue: weekdayRaw), schedule.days.contains(weekday) else { continue }
+            guard let weekday = Weekday(rawValue: weekdayRaw), days.contains(weekday) else { continue }
             var components = calendar.dateComponents([.year, .month, .day], from: candidateDay)
-            components.hour = schedule.timeMinutes / 60
-            components.minute = schedule.timeMinutes % 60
+            components.hour = timeMinutes / 60
+            components.minute = timeMinutes % 60
             components.second = 0
             guard let candidateFireDate = calendar.date(from: components), candidateFireDate > after else { continue }
             return candidateFireDate

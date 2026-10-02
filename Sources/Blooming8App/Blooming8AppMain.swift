@@ -11,12 +11,14 @@ final class AppEnvironment: ObservableObject {
     let settings: AppSettings
     let controller: PhotoController
     let scheduledSendManager: ScheduledSendManager
+    let scheduledContentManager: ScheduledContentManager
 
     init() {
         let settings = AppSettings()
         self.settings = settings
         self.controller = PhotoController(settings: settings)
         self.scheduledSendManager = ScheduledSendManager(controller: controller, settings: settings)
+        self.scheduledContentManager = ScheduledContentManager(controller: controller, settings: settings)
     }
 }
 
@@ -27,6 +29,40 @@ final class AppEnvironment: ObservableObject {
 /// one. So this asks explicitly instead of relying on the implicit default.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var openWindowAction: (() -> Void)?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Makes Finder's right-click "Send to Frame" (declared under
+        // NSServices in Info-App.plist) call `sendToFrame` below.
+        NSApp.servicesProvider = self
+        NSUpdateDynamicServices()
+    }
+
+    /// Open With → Blooming8, or photos dropped on the Dock icon.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        receive(urls)
+    }
+
+    /// Finder's "Send to Frame" service.
+    @objc func sendToFrame(_ pboard: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString>) {
+        let urls = (pboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        guard !urls.isEmpty else {
+            error.pointee = "No photos were received."
+            return
+        }
+        receive(urls)
+    }
+
+    /// Hands image files to the window (which asks what to do with them) and
+    /// brings the app forward, reopening its window if it had been closed.
+    private func receive(_ urls: [URL]) {
+        let images = urls.filter { ImageFolder.imageFileExtensions.contains($0.pathExtension.lowercased()) }
+        guard !images.isEmpty else { return }
+        Task { @MainActor in
+            IncomingFiles.shared.urls = images
+            NSApp.activate(ignoringOtherApps: true)
+            if NSApp.windows.filter({ $0.isVisible }).isEmpty { openWindowAction?() }
+        }
+    }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
@@ -50,7 +86,7 @@ struct Blooming8AppMain: App {
 
     var body: some Scene {
         WindowGroup(id: "main") {
-            RootView(settings: env.settings, controller: env.controller, scheduledSendManager: env.scheduledSendManager)
+            RootView(settings: env.settings, controller: env.controller, scheduledSendManager: env.scheduledSendManager, scheduledContentManager: env.scheduledContentManager)
                 .frame(minWidth: 900, minHeight: 560)
                 .onAppear {
                     Self.log.notice("app: window appeared")

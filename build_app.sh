@@ -50,6 +50,13 @@ build_product() {
     rm -rf "$installed"
     cp -R "$bundle" "$installed"
     echo "Installed $installed"
+
+    # Let Finder pick up the app's "Send to Frame" service and image file
+    # types without waiting for a log out / log in.
+    if [ "$bundle" = "Blooming8.app" ]; then
+        /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$installed" >/dev/null 2>&1 || true
+        /System/Library/CoreServices/pbs -update >/dev/null 2>&1 || true
+    fi
 }
 
 if [ "$TARGET" = "widget" ] || [ "$TARGET" = "all" ]; then

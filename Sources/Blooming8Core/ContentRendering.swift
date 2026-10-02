@@ -119,6 +119,39 @@ public func wrapText(_ text: String, maxCharsPerLine: Int, maxLines: Int? = nil)
     return lines
 }
 
+/// `wrapText` with `maxLines`, but without the abrupt stop: when the text is
+/// too long it ends on the last whole sentence that fits (as long as that
+/// keeps a reasonable amount of the text), otherwise on a whole word followed
+/// by "…" — rather than cutting off mid-sentence.
+public func wrapTextEndingCleanly(_ text: String, maxCharsPerLine: Int, maxLines: Int) -> [String] {
+    let all = wrapText(text, maxCharsPerLine: maxCharsPerLine)
+    guard all.count > maxLines else { return all }
+
+    let kept = all.prefix(maxLines).joined(separator: " ")
+    if let sentenceEnd = lastSentenceEnd(in: kept), kept.distance(from: kept.startIndex, to: sentenceEnd) * 10 >= kept.count * 4 {
+        return wrapText(String(kept[..<sentenceEnd]), maxCharsPerLine: maxCharsPerLine)
+    }
+
+    var words = kept.split(separator: " ").map(String.init)
+    while !words.isEmpty {
+        var candidate = words.joined(separator: " ")
+        while let last = candidate.last, ",;:-–—(".contains(last) { candidate.removeLast() }
+        let lines = wrapText(candidate + "…", maxCharsPerLine: maxCharsPerLine)
+        if lines.count <= maxLines { return lines }
+        words.removeLast()
+    }
+    return Array(all.prefix(maxLines))
+}
+
+/// The index just past the last sentence-ending punctuation in `text`
+/// (a ".", "!" or "?" followed by whitespace or the end of the string).
+private func lastSentenceEnd(in text: String) -> String.Index? {
+    guard let regex = try? NSRegularExpression(pattern: "[.!?][\"'”’)]?(?=\\s|$)") else { return nil }
+    let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+    guard let last = matches.last, let range = Range(last.range, in: text) else { return nil }
+    return range.upperBound
+}
+
 /// Word-wraps `text` to fit within `maxWidth` points at `font`, measuring
 /// each candidate line's actual rendered width rather than approximating by
 /// character count — needed when the font size itself varies (see

@@ -344,7 +344,12 @@ public final class PhotoController: ObservableObject {
     /// wide-gamut/HDR sources like HEIC correctly). Creates the gallery if it
     /// doesn't already exist. Does not display any of them — this is a bulk
     /// import, not a "show now" action.
-    public func uploadPhotos(urls: [URL], gallery: String) async {
+    ///
+    /// With `deterministicNames`, each file is named from its content key
+    /// (the same `base-<key>` scheme single sends use) instead of a timestamp,
+    /// so uploading the same photo again overwrites it rather than adding a
+    /// duplicate.
+    public func uploadPhotos(urls: [URL], gallery: String, deterministicNames: Bool = false) async {
         let trimmedGallery = gallery.trimmingCharacters(in: .whitespaces)
         guard !trimmedGallery.isEmpty else {
             statusText = "Choose or type a gallery to upload into."
@@ -368,18 +373,35 @@ public final class PhotoController: ObservableObject {
             while start < urls.count {
                 let end = min(start + batchSize, urls.count)
                 var batch: [(filename: String, data: Data)] = []
-                for index in start..<end {
-                    let url = urls[index]
-                    statusText = "Preparing \(url.lastPathComponent) (\(index + 1)/\(urls.count))..."
-                    guard let cgImage = loadUprightCGImage(at: url),
-                          let framed = renderForFrame(cgImage: cgImage, width: settings.renderWidth, height: settings.renderHeight, cropLandscapePhotos: settings.cropLandscapePhotos),
-                          let jpeg = ImageCanvas.jpegData(framed)
-                    else {
+                let batchURLs = Array(urls[start..<end])
+                statusText = "Preparing photos \(start + 1)–\(end) of \(urls.count)..."
+                // Decoding and rendering full-size photos is the slow part;
+                // do the whole batch off the main thread so the window stays
+                // responsive during a big import.
+                let renderWidth = settings.renderWidth
+                let renderHeight = settings.renderHeight
+                let cropLandscapePhotos = settings.cropLandscapePhotos
+                let rendered: [Data?] = await Task.detached(priority: .userInitiated) { [weak self] in
+                    batchURLs.map { url in
+                        guard let cgImage = loadUprightCGImage(at: url),
+                              let framed = self?.renderForFrame(cgImage: cgImage, width: renderWidth, height: renderHeight, cropLandscapePhotos: cropLandscapePhotos)
+                        else { return nil }
+                        return ImageCanvas.jpegData(framed)
+                    }
+                }.value
+                for (offset, jpeg) in rendered.enumerated() {
+                    guard let jpeg else {
                         failed += 1
                         continue
                     }
+                    let url = batchURLs[offset]
                     let baseName = sanitizeFilenameComponent(url.deletingPathExtension().lastPathComponent)
-                    let filename = orientedFilename("\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(index)")
+                    let filename: String
+                    if deterministicNames {
+                        filename = deterministicFilename(for: url)
+                    } else {
+                        filename = orientedFilename("\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(start + offset)")
+                    }
                     batch.append((filename, jpeg))
                 }
                 start = end
@@ -413,6 +435,66 @@ public final class PhotoController: ObservableObject {
             statusText = "Couldn't upload: \(error.localizedDescription)"
             logActivity("Couldn't upload to '\(trimmedGallery)': \(error.localizedDescription)", success: false)
         }
+    }
+
+    /// The on-frame filename a local photo gets when sent with a stable name:
+    /// the same `base-<key>` scheme as single sends (confirmLocalFolderCandidate),
+    /// so the same photo with the same render settings always maps to the same
+    /// file — which is what lets "already on the frame?" checks and repeated
+    /// imports skip or overwrite instead of piling up copies.
+    private func deterministicFilename(for url: URL) -> String {
+        let base = sanitizeFilenameComponent(url.deletingPathExtension().lastPathComponent)
+        // `sourceKey` is nil only if the file can't be stat'ed; a hash of its
+        // path keeps the name valid and stable in that case too.
+        let key = Self.sourceKey(forFile: url, cropLandscapePhotos: settings.cropLandscapePhotos, width: settings.renderWidth, height: settings.renderHeight)
+            ?? Self.shortHash(url.path)
+        return orientedFilename("\(base)-\(key)")
+    }
+
+    /// Picks up to `count` random photos from `folder` (and every subfolder)
+    /// that aren't already in `gallery`, and uploads them there — so the
+    /// frame's own slideshow of that gallery can run without this Mac.
+    /// Safe to run repeatedly: photos already uploaded this way are
+    /// recognised by their stable filename and skipped, so each run adds
+    /// *new* ones rather than duplicating.
+    public func addRandomPhotos(from folder: URL, count: Int, to gallery: String) async {
+        let trimmedGallery = gallery.trimmingCharacters(in: .whitespaces)
+        guard !trimmedGallery.isEmpty, count > 0 else { return }
+        isBusy = true
+        statusText = "Looking for photos in '\(folder.lastPathComponent)'…"
+        let candidates = await Task.detached(priority: .userInitiated) {
+            ImageFolder.enumerateImages(in: folder).shuffled()
+        }.value
+        guard !candidates.isEmpty else {
+            isBusy = false
+            statusText = "No photos found in '\(folder.lastPathComponent)'."
+            logActivity("No photos found in '\(folder.lastPathComponent)'", success: false)
+            return
+        }
+
+        // What's already there. A gallery that doesn't exist yet just has
+        // nothing in it; a frame that can't be reached is caught by the
+        // upload itself right after.
+        let existing = Set((try? await withWakeRetry { try await client.fetchAllImages(ip: settings.deviceIP, gallery: trimmedGallery) }) ?? [])
+
+        var chosen: [URL] = []
+        var alreadyThere = 0
+        for url in candidates {
+            if existing.contains(deterministicFilename(for: url)) {
+                alreadyThere += 1
+                continue
+            }
+            chosen.append(url)
+            if chosen.count == count { break }
+        }
+        isBusy = false
+
+        guard !chosen.isEmpty else {
+            statusText = "Every photo I tried from '\(folder.lastPathComponent)' is already in '\(trimmedGallery)'."
+            logActivity("Nothing new to add to '\(trimmedGallery)' from '\(folder.lastPathComponent)'", success: true)
+            return
+        }
+        await uploadPhotos(urls: chosen, gallery: trimmedGallery, deterministicNames: true)
     }
 
     /// Downloads every photo in a gallery into a subfolder (named after the
@@ -958,6 +1040,22 @@ public final class PhotoController: ObservableObject {
             statusText = "Select at least one content source."
             return
         }
+        await showGeneratedContent(from: source)
+    }
+
+    /// Runs a scheduled content entry now (also the "Run Now" button in
+    /// Settings): generates from its source — today's item where it has one
+    /// and the schedule asks for it — then uploads and displays it.
+    public func fireScheduledContent(_ schedule: ScheduledContent) async {
+        guard let source = ContentSources.all.first(where: { $0.id == schedule.sourceID }) else {
+            statusText = "Scheduled content: that source no longer exists."
+            logActivity("Scheduled content: unknown source '\(schedule.sourceID)'", success: false)
+            return
+        }
+        await showGeneratedContent(from: source, today: schedule.useToday)
+    }
+
+    private func showGeneratedContent(from source: ContentSource, today: Bool = false) async {
         isBusy = true
         defer { isBusy = false }
         do {
@@ -965,10 +1063,26 @@ public final class PhotoController: ObservableObject {
             applyDeviceInfo(info)
 
             statusText = "Generating \(source.displayName)..."
-            let imageData = try await source.generateImage(settings: settings)
+            let usesToday = today && source is TodayContentSource
+            let imageData: Data
+            if usesToday, let todaySource = source as? TodayContentSource {
+                imageData = try await todaySource.generateTodayImage(settings: settings)
+            } else {
+                imageData = try await source.generateImage(settings: settings)
+            }
 
             await client.ensureGallery(ip: settings.deviceIP, name: source.galleryName)
-            let filename = orientedFilename("\(source.id)_\(Int(Date().timeIntervalSince1970))")
+            // Today's item is named by date, so running it twice in a day
+            // replaces that day's copy instead of adding another.
+            let stamp: String
+            if usesToday {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyyMMdd"
+                stamp = "today_\(formatter.string(from: Date()))"
+            } else {
+                stamp = String(Int(Date().timeIntervalSince1970))
+            }
+            let filename = orientedFilename("\(source.id)_\(stamp)")
             let path = try await client.uploadImage(
                 ip: settings.deviceIP,
                 filename: filename,
@@ -1211,6 +1325,24 @@ public final class PhotoController: ObservableObject {
         }
         localFolderCandidates = candidates
         statusText = ""
+    }
+
+    /// Replaces the pending candidates with just `source`'s "today" item (for
+    /// APOD, the actual picture of the day). Returns an error message if it
+    /// couldn't be fetched, leaving the existing candidates untouched.
+    public func prepareTodayCandidate(source: TodayContentSource) async -> String? {
+        do {
+            let jpeg = try await source.generateTodayImage(settings: settings)
+            guard let image = NSImage(data: jpeg) else {
+                return "Couldn't read today's \(source.displayName)."
+            }
+            let name = "\(source.id)_today_\(Int(Date().timeIntervalSince1970 * 1000))"
+            localFolderCandidates = [LocalFolderCandidate(fileURL: URL(fileURLWithPath: name), image: image, jpegData: jpeg, gallery: source.galleryName, isLocalFile: false)]
+            statusText = ""
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     /// Picks one random item — image or video — from the whole Local Folder

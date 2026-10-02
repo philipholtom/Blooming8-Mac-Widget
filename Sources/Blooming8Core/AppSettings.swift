@@ -253,6 +253,12 @@ public final class AppSettings: ObservableObject {
         set { mutateActiveProfile { $0.scheduledSend = newValue } }
     }
 
+    /// A generated picture shown on a schedule — see `ScheduledContent`.
+    public var scheduledContent: ScheduledContent? {
+        get { activeProfile.scheduledContent }
+        set { mutateActiveProfile { $0.scheduledContent = newValue } }
+    }
+
     /// Bearer token for this frame's separate remote-push relay API
     /// ("einkshot" — see `EinkshotClient`), for sending a photo over the
     /// internet rather than the local network. Lives in Keychain, keyed by

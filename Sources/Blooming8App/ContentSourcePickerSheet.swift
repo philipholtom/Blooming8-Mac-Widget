@@ -26,6 +26,8 @@ struct ContentSourcePickerSheet: View {
     @State private var isSending = false
     @State private var selected: PhotoController.LocalFolderCandidate?
     @State private var fetchError: String?
+    @State private var isFetchingToday = false
+    @State private var todayError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -33,6 +35,18 @@ struct ContentSourcePickerSheet: View {
                 Text(source.displayName)
                     .font(.headline)
                 Spacer()
+                if stage == .picking, let todaySource = source as? TodayContentSource {
+                    Button {
+                        Task { await showToday(todaySource) }
+                    } label: {
+                        if isFetchingToday {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label(todaySource.todayButtonTitle, systemImage: "calendar")
+                        }
+                    }
+                    .disabled(isFetching || isRefreshing || isFetchingToday)
+                }
                 if stage == .picking, !isFetching, !controller.localFolderCandidates.isEmpty {
                     Button {
                         Task { await refresh() }
@@ -43,6 +57,12 @@ struct ContentSourcePickerSheet: View {
                 }
                 Button("Cancel") { dismiss() }
                     .disabled(isSending)
+            }
+
+            if let todayError, stage == .picking {
+                Label(todayError, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
             }
 
             content
@@ -161,6 +181,21 @@ struct ContentSourcePickerSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// Today's picture goes straight to the confirm step — it's one specific
+    /// item, so there's nothing to choose between.
+    private func showToday(_ todaySource: TodayContentSource) async {
+        isFetchingToday = true
+        todayError = nil
+        let error = await controller.prepareTodayCandidate(source: todaySource)
+        isFetchingToday = false
+        if let error {
+            todayError = error
+        } else if let candidate = controller.localFolderCandidates.first {
+            selected = candidate
+            stage = .confirming
+        }
+    }
+
     private func refresh() async {
         // First load shows the full-screen spinner; a "Next" re-fetch keeps
         // the current set dimmed underneath instead, so it doesn't flash
@@ -168,6 +203,7 @@ struct ContentSourcePickerSheet: View {
         isFetching = controller.localFolderCandidates.isEmpty
         isRefreshing = !isFetching
         fetchError = nil
+        todayError = nil
         await controller.prepareContentCandidates(source: source)
         if controller.localFolderCandidates.isEmpty {
             fetchError = "Couldn't generate any \(source.displayName) options right now."

@@ -29,6 +29,7 @@ struct FileBrowserView: View {
     @State private var videoEntry: Entry?
     @State private var cropEntry: Entry?
     @State private var showRandomPicker = false
+    @State private var showAddToGallery = false
 
     private let columns = [GridItem(.adaptive(minimum: 110, maximum: 170), spacing: 14)]
 
@@ -71,6 +72,11 @@ struct FileBrowserView: View {
         .sheet(isPresented: $showRandomPicker) {
             if let target = currentPath ?? rootURL {
                 LocalFolderCandidatePickerSheet(controller: controller, source: .folder(target))
+            }
+        }
+        .sheet(isPresented: $showAddToGallery) {
+            if let target = currentPath ?? rootURL {
+                AddRandomToGallerySheet(folder: target, controller: controller, settings: settings)
             }
         }
         .sheet(item: $videoEntry) { entry in
@@ -144,6 +150,14 @@ struct FileBrowserView: View {
                 Label("Change Folder…", systemImage: "folder.badge.gearshape")
             }
             .help("Browse a different folder on this Mac")
+
+            Button {
+                showAddToGallery = true
+            } label: {
+                Label("Add to Gallery…", systemImage: "rectangle.stack.badge.plus")
+            }
+            .disabled(currentPath == nil || settings.deviceIP.isEmpty)
+            .help("Upload random photos from this folder and its subfolders into a gallery on the frame")
 
             Button {
                 showRandomPicker = true

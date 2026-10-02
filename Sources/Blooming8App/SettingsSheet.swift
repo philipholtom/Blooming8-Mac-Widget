@@ -6,6 +6,7 @@ struct SettingsSheet: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var controller: PhotoController
     @ObservedObject var scheduledSendManager: ScheduledSendManager
+    @ObservedObject var scheduledContentManager: ScheduledContentManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var ipDraft = ""
@@ -148,6 +149,9 @@ struct SettingsSheet: View {
                 }
                 Section("Scheduled Send · \(activeProfileName)") {
                     scheduledSendSection
+                }
+                Section("Scheduled Content · \(activeProfileName)") {
+                    scheduledContentSection
                 }
                     case .galleries:
                 privacySections
@@ -609,6 +613,114 @@ struct SettingsSheet: View {
                     settings.scheduledSend?.days.insert(day)
                 } else {
                     settings.scheduledSend?.days.remove(day)
+                }
+            }
+        )
+    }
+
+    // MARK: - Scheduled content
+
+    @ViewBuilder
+    private var scheduledContentSection: some View {
+        Toggle("Show a generated picture on a schedule", isOn: scheduledContentEnabledBinding)
+
+        if let schedule = settings.scheduledContent, schedule.isEnabled {
+            Picker("Show", selection: scheduledContentSourceBinding) {
+                ForEach(ContentSources.all, id: \.id) { source in
+                    Text(source.displayName).tag(source.id)
+                }
+            }
+
+            if ContentSources.all.first(where: { $0.id == schedule.sourceID }) is TodayContentSource {
+                Toggle("Use today's picture, not a random one", isOn: scheduledContentUseTodayBinding)
+            }
+
+            DatePicker("At", selection: scheduledContentTimeBinding, displayedComponents: .hourAndMinute)
+
+            HStack(spacing: 4) {
+                Text("Days")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                ForEach(Weekday.displayOrder) { day in
+                    Toggle(day.shortLabel, isOn: scheduledContentDayBinding(day))
+                        .toggleStyle(.button)
+                        .font(.caption2)
+                }
+            }
+
+            if schedule.days.isEmpty {
+                Text("Pick at least one day.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if let next = scheduledContentManager.nextFireDate {
+                Label("Next: \(next.formatted(date: .abbreviated, time: .shortened))", systemImage: "clock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Button("Run Now") {
+                    Task { await controller.fireScheduledContent(schedule) }
+                }
+                .disabled(controller.isBusy || settings.deviceIP.isEmpty)
+                Text("Needs this app open at the time. If the Mac is asleep, it runs when it wakes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var scheduledContentEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { settings.scheduledContent?.isEnabled ?? false },
+            set: { on in
+                if settings.scheduledContent == nil {
+                    settings.scheduledContent = ScheduledContent(isEnabled: on)
+                } else {
+                    settings.scheduledContent?.isEnabled = on
+                }
+            }
+        )
+    }
+
+    private var scheduledContentSourceBinding: Binding<String> {
+        Binding(
+            get: { settings.scheduledContent?.sourceID ?? "apod" },
+            set: { settings.scheduledContent?.sourceID = $0 }
+        )
+    }
+
+    private var scheduledContentUseTodayBinding: Binding<Bool> {
+        Binding(
+            get: { settings.scheduledContent?.useToday ?? true },
+            set: { settings.scheduledContent?.useToday = $0 }
+        )
+    }
+
+    private var scheduledContentTimeBinding: Binding<Date> {
+        Binding(
+            get: {
+                var components = DateComponents()
+                let minutes = settings.scheduledContent?.timeMinutes ?? 7 * 60
+                components.hour = minutes / 60
+                components.minute = minutes % 60
+                return Calendar.current.date(from: components) ?? Date()
+            },
+            set: { newDate in
+                let dc = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                settings.scheduledContent?.timeMinutes = (dc.hour ?? 0) * 60 + (dc.minute ?? 0)
+            }
+        )
+    }
+
+    private func scheduledContentDayBinding(_ day: Weekday) -> Binding<Bool> {
+        Binding(
+            get: { settings.scheduledContent?.days.contains(day) ?? false },
+            set: { isOn in
+                if isOn {
+                    settings.scheduledContent?.days.insert(day)
+                } else {
+                    settings.scheduledContent?.days.remove(day)
                 }
             }
         )

@@ -13,6 +13,14 @@ public protocol ContentSource {
     func generateImage(settings: AppSettings) async throws -> Data
 }
 
+/// A source that can also produce "today's" item, not only a random one — for
+/// APOD, the actual picture of the day. The picker offers it as a button, and
+/// scheduled auto-show uses it instead of a random date.
+public protocol TodayContentSource: ContentSource {
+    var todayButtonTitle: String { get }
+    func generateTodayImage(settings: AppSettings) async throws -> Data
+}
+
 public enum ContentSourceError: LocalizedError {
     case message(String)
 

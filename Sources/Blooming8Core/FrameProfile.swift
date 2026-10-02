@@ -30,6 +30,7 @@ public struct FrameProfile: Identifiable, Codable, Equatable {
     public var cropLandscapePhotos: Bool
     public var favoriteImagePaths: [String]
     public var scheduledSend: ScheduledSend?
+    public var scheduledContent: ScheduledContent?
 
     public init(name: String = "New Frame") {
         self.id = UUID()
@@ -48,5 +49,6 @@ public struct FrameProfile: Identifiable, Codable, Equatable {
         self.cropLandscapePhotos = false
         self.favoriteImagePaths = []
         self.scheduledSend = nil
+        self.scheduledContent = nil
     }
 }
