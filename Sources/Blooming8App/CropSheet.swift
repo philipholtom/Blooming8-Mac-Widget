@@ -10,6 +10,9 @@ struct CropSheet: View {
     /// The frame canvas's width / height (orientation already applied).
     let canvasAspect: Double
     let onApply: (CropRegion) -> Void
+    /// Given for a local photo, so the preview can be blurred if it comes
+    /// from locked content; nil for photos from outside the app's locked areas.
+    let settings: AppSettings?
 
     @Environment(\.dismiss) private var dismiss
     @State private var cgImage: CGImage?
@@ -19,17 +22,24 @@ struct CropSheet: View {
 
     private let previewSize = CGSize(width: 640, height: 440)
 
-    init(imageURL: URL, canvasAspect: Double, initial: CropRegion = .centered, onApply: @escaping (CropRegion) -> Void) {
+    init(imageURL: URL, canvasAspect: Double, initial: CropRegion = .centered, settings: AppSettings? = nil, onApply: @escaping (CropRegion) -> Void) {
         self.imageURL = imageURL
         self.canvasAspect = canvasAspect
         self.onApply = onApply
+        self.settings = settings
         _crop = State(initialValue: initial)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Crop")
-                .font(.headline)
+            HStack {
+                Text("Crop")
+                    .font(.headline)
+                Spacer()
+                if let settings {
+                    PrivacyBlurButton(settings: settings, isLocalFile: true)
+                }
+            }
             Text("Drag the box to choose what the frame shows. Zoom to keep a tighter area.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -87,9 +97,10 @@ struct CropSheet: View {
         let boxOnScreen = CGRect(x: box.minX * scale, y: box.minY * scale, width: box.width * scale, height: box.height * scale)
 
         return ZStack(alignment: .topLeading) {
-            Image(nsImage: NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height)))
+            PrivacyImage(NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height)), settings: settings, isLocalFile: true)
                 .resizable()
                 .frame(width: shown.width, height: shown.height)
+                .privacyBlurIfLocal(settings: settings)
 
             Path { path in
                 path.addRect(CGRect(origin: .zero, size: shown))

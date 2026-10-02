@@ -54,6 +54,7 @@ struct LocalFolderCandidatePickerSheet: View {
                 Text(source.title)
                     .font(.headline)
                 Spacer()
+                PrivacyBlurButton(settings: controller.settings, isLocalFile: true)
                 if stage == .picking, !isFetching, !controller.localFolderCandidates.isEmpty {
                     Button {
                         Task { await refresh() }
@@ -116,10 +117,11 @@ struct LocalFolderCandidatePickerSheet: View {
                     // established for this project's other candidate grids
                     // (see ContentSourcePickerSheet/VideoFramePickerSheet),
                     // where Button showed intermittent missed clicks.
-                    Image(nsImage: candidate.image)
+                    PrivacyImage(candidate.image, settings: controller.settings, isLocalFile: true)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .privacyBlur(settings: controller.settings, isLocalFile: true)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             selected = candidate
@@ -145,10 +147,11 @@ struct LocalFolderCandidatePickerSheet: View {
     private var confirmingContent: some View {
         VStack(spacing: 14) {
             if let selected {
-                Image(nsImage: selected.image)
+                PrivacyImage(selected.image, settings: controller.settings, isLocalFile: true)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .privacyBlur(settings: controller.settings, isLocalFile: true)
             }
 
             if !controller.statusText.isEmpty {
@@ -191,7 +194,8 @@ struct LocalFolderCandidatePickerSheet: View {
                 CropSheet(
                     imageURL: selected.fileURL,
                     canvasAspect: Double(controller.settings.renderWidth) / Double(controller.settings.renderHeight),
-                    initial: appliedCrop ?? .centered
+                    initial: appliedCrop ?? .centered,
+                    settings: controller.settings
                 ) { region in
                     if let updated = controller.cropped(selected, crop: region) {
                         self.selected = updated

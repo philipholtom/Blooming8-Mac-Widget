@@ -62,10 +62,11 @@ struct CurrentPhotoPane: View {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color.gray.opacity(0.12))
                 if let image = controller.previewImage {
-                    Image(nsImage: image)
+                    PrivacyImage(image, settings: settings, gallery: controller.currentGalleryOnDevice, isLocalFile: controller.currentLocalSourceURL != nil)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .privacyBlur(settings: settings, gallery: controller.currentGalleryOnDevice, isLocalFile: controller.currentLocalSourceURL != nil)
                 } else {
                     VStack(spacing: 8) {
                         Image(systemName: "photo")
@@ -77,6 +78,10 @@ struct CurrentPhotoPane: View {
                 }
             }
             .aspectRatio(3.0 / 4.0, contentMode: .fit)
+            .overlay(alignment: .topTrailing) {
+                PrivacyBlurButton(settings: settings, gallery: controller.currentGalleryOnDevice, isLocalFile: controller.currentLocalSourceURL != nil)
+                    .padding(10)
+            }
 
             if let path = controller.currentImagePath {
                 VStack(alignment: .leading, spacing: 2) {

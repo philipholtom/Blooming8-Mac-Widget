@@ -52,7 +52,8 @@ struct InspectorPane: View {
             if let url = item.url {
                 CropSheet(
                     imageURL: url,
-                    canvasAspect: Double(settings.renderWidth) / Double(settings.renderHeight)
+                    canvasAspect: Double(settings.renderWidth) / Double(settings.renderHeight),
+                    settings: settings
                 ) { region in
                     Task { await controller.sendCropped(fileURL: url, crop: region) }
                 }
@@ -66,15 +67,20 @@ struct InspectorPane: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color.gray.opacity(0.15))
             if let preview {
-                Image(nsImage: preview)
+                PrivacyImage(preview, settings: settings, gallery: item.galleryName, isLocalFile: item.url != nil)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .privacyBlur(settings: settings, gallery: item.galleryName, isLocalFile: item.url != nil)
             } else {
                 ProgressView().controlSize(.small)
             }
         }
         .frame(height: 210)
+        .overlay(alignment: .topTrailing) {
+            PrivacyBlurButton(settings: settings, gallery: item.galleryName, isLocalFile: item.url != nil)
+                .padding(8)
+        }
     }
 
     @ViewBuilder

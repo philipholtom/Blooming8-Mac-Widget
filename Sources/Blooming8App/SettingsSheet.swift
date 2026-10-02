@@ -45,6 +45,7 @@ struct SettingsSheet: View {
     @State private var thumbnailCacheSizeBytes = 0
     @State private var newFrameProfileName = ""
     @State private var pendingFrameProfileDeletion: FrameProfile?
+    @ObservedObject private var privacy = PrivacyBlur.shared
     @AppStorage("settingsSheetCategory") private var category: SettingsCategory = .frames
 
     var body: some View {
@@ -940,6 +941,33 @@ struct SettingsSheet: View {
                 if let privacyMessage {
                     Text(privacyMessage).font(.caption).foregroundStyle(.secondary)
                 }
+            }
+        }
+
+        Section("Previews") {
+            Toggle("Hide previews of locked content", isOn: $privacy.enabled)
+            Text("Covers photos from locked galleries, Local Folder, Favorites and Browse Files on screen. Also on the toolbar (⇧⌘B) and on the previews themselves. Off by default.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Picker("Style", selection: $privacy.style) {
+                ForEach(PrivacyBlur.Style.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            LabeledContent(privacy.style == .pixelate ? "Block size" : "Strength") {
+                HStack(spacing: 10) {
+                    Text(privacy.style == .pixelate ? "Fine" : "Light").font(.caption).foregroundStyle(.secondary)
+                    if privacy.style == .pixelate {
+                        Slider(value: $privacy.pixelFraction, in: PrivacyBlur.pixelRange)
+                            .frame(width: 160)
+                    } else {
+                        Slider(value: $privacy.radius, in: PrivacyBlur.radiusRange)
+                            .frame(width: 160)
+                    }
+                    Text(privacy.style == .pixelate ? "Coarse" : "Strong").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            LabeledContent("Sample") {
+                PrivacyBlurSample()
             }
         }
 

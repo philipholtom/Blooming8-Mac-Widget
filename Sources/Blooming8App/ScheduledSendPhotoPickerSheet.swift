@@ -108,9 +108,10 @@ private struct PhotoPickerCell: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.gray.opacity(0.12))
                 if let image {
-                    Image(nsImage: image)
+                    PrivacyImage(image, settings: settings, gallery: item.galleryName)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
+                        .privacyBlur(settings: settings, gallery: item.galleryName)
                 }
             }
             .frame(height: 130)

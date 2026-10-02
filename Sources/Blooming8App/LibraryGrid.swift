@@ -52,7 +52,8 @@ struct LibraryGrid: View {
             if let url = item.url {
                 CropSheet(
                     imageURL: url,
-                    canvasAspect: Double(controller.settings.renderWidth) / Double(controller.settings.renderHeight)
+                    canvasAspect: Double(controller.settings.renderWidth) / Double(controller.settings.renderHeight),
+                    settings: settings
                 ) { region in
                     Task { await controller.sendCropped(fileURL: url, crop: region) }
                 }
@@ -443,10 +444,11 @@ private struct LibraryCell: View {
                     .fill(Color.gray.opacity(0.15))
 
                 if let image {
-                    Image(nsImage: image)
+                    PrivacyImage(image, settings: settings, gallery: item.galleryName, isLocalFile: item.isLocal)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .privacyBlur(settings: settings, gallery: item.galleryName, isLocalFile: item.isLocal)
                 } else if didAttemptLoad {
                     Image(systemName: item.isVideo ? "film" : (item.isLocal ? "questionmark.square.dashed" : "photo"))
                         .font(.system(size: 20))

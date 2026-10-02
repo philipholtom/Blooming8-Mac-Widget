@@ -112,12 +112,13 @@ struct VideoFramePickerSheet: View {
                         // LazyVGrid, on this OS). Same fix as the sidebar
                         // bug earlier: the simpler, more direct gesture
                         // works where the higher-level control didn't.
-                        Image(nsImage: frame)
+                        PrivacyImage(frame, settings: controller.settings, isLocalFile: true)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                             .frame(height: 110)
                             .clipped()
                             .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .privacyBlur(settings: controller.settings, isLocalFile: true)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 selectFrame(frame)
@@ -153,10 +154,11 @@ struct VideoFramePickerSheet: View {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color.gray.opacity(0.15))
                 if let image = candidate?.image {
-                    Image(nsImage: image)
+                    PrivacyImage(image, settings: controller.settings, isLocalFile: true)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .privacyBlur(settings: controller.settings, isLocalFile: true)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

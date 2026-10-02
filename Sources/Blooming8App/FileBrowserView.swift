@@ -85,7 +85,8 @@ struct FileBrowserView: View {
         .sheet(item: $cropEntry) { entry in
             CropSheet(
                 imageURL: entry.url,
-                canvasAspect: Double(settings.renderWidth) / Double(settings.renderHeight)
+                canvasAspect: Double(settings.renderWidth) / Double(settings.renderHeight),
+                settings: settings
             ) { region in
                 Task { await controller.sendCropped(fileURL: entry.url, crop: region) }
             }
@@ -143,6 +144,8 @@ struct FileBrowserView: View {
             }
 
             Spacer()
+
+            PrivacyBlurButton(settings: settings, isLocalFile: true)
 
             Button {
                 chooseNewRoot()
@@ -249,7 +252,7 @@ struct FileBrowserView: View {
     // MARK: - Cell
 
     private func cell(for entry: Entry) -> some View {
-        FileBrowserCell(entry: entry, isSelected: selectedID == entry.id)
+        FileBrowserCell(entry: entry, isSelected: selectedID == entry.id, settings: settings)
             .onTapGesture {
                 switch entry.kind {
                 case .folder:
@@ -325,6 +328,7 @@ private struct FileBrowserCell: View {
     fileprivate typealias Entry = FileBrowserView.Entry
     let entry: Entry
     let isSelected: Bool
+    let settings: AppSettings
 
     @State private var thumbnail: NSImage?
     @State private var didAttemptLoad = false
@@ -340,10 +344,11 @@ private struct FileBrowserCell: View {
                         .font(.system(size: 30))
                         .foregroundStyle(.secondary)
                 } else if let thumbnail {
-                    Image(nsImage: thumbnail)
+                    PrivacyImage(thumbnail, settings: settings, isLocalFile: true)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .privacyBlur(settings: settings, isLocalFile: true)
                 } else if didAttemptLoad {
                     Image(systemName: entry.kind == .video ? "film" : "questionmark.square.dashed")
                         .font(.system(size: 20))

@@ -29,6 +29,10 @@ struct RandomPhotoPickerSheet: View {
                 Text("Random Photo")
                     .font(.headline)
                 Spacer()
+                PrivacyBlurButton(
+                    settings: controller.settings,
+                    gallery: controller.randomPhotoCandidates.map(\.gallery).first { PrivacyBlur.appliesTo(settings: controller.settings, gallery: $0, isLocalFile: false) }
+                )
                 if stage == .picking, !isFetching, !controller.randomPhotoCandidates.isEmpty {
                     Button {
                         Task { await refresh() }
@@ -91,10 +95,11 @@ struct RandomPhotoPickerSheet: View {
                     // established for this project's other candidate grids
                     // (see ContentSourcePickerSheet/LocalFolderCandidatePickerSheet),
                     // where Button showed intermittent missed clicks.
-                    Image(nsImage: candidate.image)
+                    PrivacyImage(candidate.image, settings: controller.settings, gallery: candidate.gallery)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .privacyBlur(settings: controller.settings, gallery: candidate.gallery)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             selected = candidate
@@ -119,10 +124,11 @@ struct RandomPhotoPickerSheet: View {
     private var confirmingContent: some View {
         VStack(spacing: 14) {
             if let selected {
-                Image(nsImage: selected.image)
+                PrivacyImage(selected.image, settings: controller.settings, gallery: selected.gallery)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .privacyBlur(settings: controller.settings, gallery: selected.gallery)
             }
 
             if !controller.statusText.isEmpty {

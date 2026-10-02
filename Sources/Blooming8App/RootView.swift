@@ -12,6 +12,7 @@ struct RootView: View {
     @ObservedObject var scheduledContentManager: ScheduledContentManager
     @StateObject private var library: LibraryModel
     @ObservedObject private var incoming = IncomingFiles.shared
+    @ObservedObject private var privacy = PrivacyBlur.shared
 
     @State private var source: LibrarySource? = .currentPhoto
     @State private var showSettings = false
@@ -229,6 +230,18 @@ struct RootView: View {
             .help(controller.keepAwake
                 ? "Keeping the frame awake — click to let it sleep normally again"
                 : "Keep the frame awake instead of letting it idle to sleep (uses battery; turns off by itself if the battery gets low)")
+
+            Button {
+                privacy.enabled.toggle()
+            } label: {
+                ToolbarLabel(title: "Privacy", systemImage: privacy.enabled ? "eye.slash" : "eye")
+                    .foregroundStyle(privacy.enabled ? Color.accentColor : Color.primary)
+            }
+            .keyboardShortcut("b", modifiers: [.command, .shift])
+            .help(privacy.enabled
+                ? "Previews of locked content are hidden — click to show them (⇧⌘B). Right-click for style and strength."
+                : "Hide previews of locked galleries, Local Folder and Favorites (⇧⌘B). Right-click for style and strength.")
+            .contextMenu { PrivacyBlurStrengthMenu() }
 
             if isGridSource {
                 Slider(value: $thumbnailSize, in: 90...280) {
