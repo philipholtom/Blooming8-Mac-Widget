@@ -8,7 +8,7 @@ import Foundation
 /// profile.
 ///
 /// `einkshotToken` is deliberately NOT a field here — like `GalleryTab`'s
-/// `passwordHash`, it's a secret and lives in Keychain instead, keyed by
+/// `passwordHash`, it's a secret and lives in the secret store (`SecretStore`) instead, keyed by
 /// this profile's `id` (see `AppSettings.einkshotToken`).
 public struct FrameProfile: Identifiable, Codable, Equatable {
     public var id: UUID

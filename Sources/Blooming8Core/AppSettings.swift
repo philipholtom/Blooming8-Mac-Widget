@@ -118,15 +118,15 @@ public final class AppSettings: ObservableObject {
         activeFrameProfileID = profile.id
     }
 
-    /// Removes a profile (and its Keychain-held remote-push token). Refuses
+    /// Removes a profile (and its remote-push token from the secret store). Refuses
     /// to remove the last remaining profile — the app always needs
     /// somewhere for its per-frame settings to live — and switches to the
     /// first remaining profile if the active one was removed.
     public func deleteFrameProfile(_ id: UUID) {
         guard frameProfiles.count > 1, let index = frameProfiles.firstIndex(where: { $0.id == id }) else { return }
-        KeychainStore.delete(account: Self.einkshotTokenAccount(for: id))
+        SecretStore.delete(account: Self.einkshotTokenAccount(for: id))
         for tab in frameProfiles[index].tabs {
-            KeychainStore.delete(account: GalleryTab.keychainAccount(for: tab.id))
+            SecretStore.delete(account: GalleryTab.keychainAccount(for: tab.id))
         }
         frameProfiles.remove(at: index)
         if activeFrameProfileID == id {
@@ -190,23 +190,23 @@ public final class AppSettings: ObservableObject {
     public var tabs: [GalleryTab] {
         get { activeProfile.tabs }
         set {
-            // Password hashes live in Keychain, not this profile's JSON —
-            // keep Keychain in sync here, in the one place tabs actually
+            // Password hashes live in the secret store, not this profile's JSON —
+            // keep it in sync here, in the one place tabs actually
             // change, rather than scattering writes across every call site
             // that mutates a tab's password.
             for tab in newValue {
                 let account = GalleryTab.keychainAccount(for: tab.id)
                 if let hash = tab.passwordHash {
-                    KeychainStore.write(hash, account: account)
+                    SecretStore.write(hash, account: account)
                 } else {
-                    KeychainStore.delete(account: account)
+                    SecretStore.delete(account: account)
                 }
             }
             // A tab that existed before but not anymore (deleted) would
-            // otherwise leave its Keychain entry orphaned forever.
+            // otherwise leave its stored hash orphaned forever.
             let currentIDs = Set(newValue.map(\.id))
             for removed in activeProfile.tabs where !currentIDs.contains(removed.id) {
-                KeychainStore.delete(account: GalleryTab.keychainAccount(for: removed.id))
+                SecretStore.delete(account: GalleryTab.keychainAccount(for: removed.id))
             }
             mutateActiveProfile { $0.tabs = newValue }
         }
@@ -261,19 +261,19 @@ public final class AppSettings: ObservableObject {
 
     /// Bearer token for this frame's separate remote-push relay API
     /// ("einkshot" — see `EinkshotClient`), for sending a photo over the
-    /// internet rather than the local network. Lives in Keychain, keyed by
+    /// internet rather than the local network. Lives in the secret store (`SecretStore`), keyed by
     /// the active profile's id — not part of `FrameProfile`'s own JSON, the
     /// same reasoning as `GalleryTab.passwordHash`.
     public var einkshotToken: String? {
-        get { KeychainStore.read(account: Self.einkshotTokenAccount(for: activeFrameProfileID)) }
+        get { SecretStore.read(account: Self.einkshotTokenAccount(for: activeFrameProfileID)) }
         set {
             let account = Self.einkshotTokenAccount(for: activeFrameProfileID)
             if let newValue, !newValue.trimmingCharacters(in: .whitespaces).isEmpty {
-                KeychainStore.write(newValue, account: account)
+                SecretStore.write(newValue, account: account)
             } else {
-                KeychainStore.delete(account: account)
+                SecretStore.delete(account: account)
             }
-            // Doesn't go through `frameProfiles` (Keychain-backed, not
+            // Doesn't go through `frameProfiles` (secret-store-backed, not
             // JSON), so nothing else triggers a republish for SwiftUI here.
             objectWillChange.send()
         }
@@ -334,16 +334,16 @@ public final class AppSettings: ObservableObject {
     }
 
     /// Hash of the Local Folder password (nil if not locked). Lives in
-    /// Keychain, not this UserDefaults suite — the suite's own doc comment
+    /// the secret store, not this UserDefaults suite — the suite's own doc comment
     /// above explains why it can't have real access-group protection
     /// (no App Groups entitlement without a paid Developer ID), which is
     /// exactly why a password hash shouldn't sit in it as plain text.
     @Published public var localFolderPasswordHash: String? {
         didSet {
             if let localFolderPasswordHash {
-                KeychainStore.write(localFolderPasswordHash, account: Self.localFolderPasswordAccount)
+                SecretStore.write(localFolderPasswordHash, account: Self.localFolderPasswordAccount)
             } else {
-                KeychainStore.delete(account: Self.localFolderPasswordAccount)
+                SecretStore.delete(account: Self.localFolderPasswordAccount)
             }
         }
     }
@@ -402,8 +402,8 @@ public final class AppSettings: ObservableObject {
             // so this is defense in depth, not a fix for actual data loss.)
             let profile = AppSettings.legacyProfile(from: defaults, id: Self.legacyProfileID)
             resolvedProfiles = [profile]
-            if let legacyToken = KeychainStore.read(account: "einkshotDeviceToken") {
-                KeychainStore.write(legacyToken, account: Self.einkshotTokenAccount(for: profile.id))
+            if let legacyToken = SecretStore.read(account: "einkshotDeviceToken") {
+                SecretStore.write(legacyToken, account: Self.einkshotTokenAccount(for: profile.id))
             }
         }
 
@@ -435,15 +435,15 @@ public final class AppSettings: ObservableObject {
         randomFolderPath = defaults.string(forKey: "randomFolderPath") ?? ""
         browseFilesRootPath = defaults.string(forKey: "browseFilesRootPath") ?? ""
         localFolderLocked = defaults.bool(forKey: "localFolderLocked")
-        if let fromKeychain = KeychainStore.read(account: Self.localFolderPasswordAccount) {
-            Self.log.notice("localFolderPasswordHash: read from Keychain")
-            localFolderPasswordHash = fromKeychain
+        if let fromStore = SecretStore.read(account: Self.localFolderPasswordAccount) {
+            Self.log.notice("localFolderPasswordHash: read from the secret store")
+            localFolderPasswordHash = fromStore
         } else if let legacy = defaults.string(forKey: "localFolderPasswordHash") {
             // One-time migration: this was sitting in the shared
             // UserDefaults suite as plain text before password hashes
-            // moved to Keychain.
-            Self.log.notice("localFolderPasswordHash: migrating legacy UserDefaults value into Keychain")
-            KeychainStore.write(legacy, account: Self.localFolderPasswordAccount)
+            // moved to the secret store.
+            Self.log.notice("localFolderPasswordHash: migrating legacy UserDefaults value into the secret store")
+            SecretStore.write(legacy, account: Self.localFolderPasswordAccount)
             defaults.removeObject(forKey: "localFolderPasswordHash")
             localFolderPasswordHash = legacy
         } else {

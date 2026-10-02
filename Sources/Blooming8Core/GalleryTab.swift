@@ -12,7 +12,7 @@ public struct GalleryTab: Identifiable, Equatable {
     public var galleryNames: Set<String>
     /// Kept in memory here for convenience, but deliberately NOT part of
     /// this type's JSON representation (see the custom `Codable` below) —
-    /// it lives in Keychain instead, keyed by `id`.
+    /// it lives in the secret store (`SecretStore`) instead, keyed by `id`.
     public var passwordHash: String?
 
     public init(id: UUID = UUID(), name: String, galleryNames: Set<String> = [], passwordHash: String? = nil) {
@@ -44,14 +44,14 @@ extension GalleryTab: Codable {
         galleryNames = try container.decode(Set<String>.self, forKey: .galleryNames)
 
         let account = Self.keychainAccount(for: id)
-        if let fromKeychain = KeychainStore.read(account: account) {
-            passwordHash = fromKeychain
+        if let fromStore = SecretStore.read(account: account) {
+            passwordHash = fromStore
         } else if let legacy = try container.decodeIfPresent(String.self, forKey: .legacyPasswordHash) {
             // One-time migration: this tab's hash was still sitting in the
             // UserDefaults-backed JSON blob from before hashes moved to
             // Keychain. Move it over now so this branch isn't hit again for
             // this tab.
-            KeychainStore.write(legacy, account: account)
+            SecretStore.write(legacy, account: account)
             passwordHash = legacy
         } else {
             passwordHash = nil
@@ -64,7 +64,7 @@ extension GalleryTab: Codable {
         try container.encode(name, forKey: .name)
         try container.encode(galleryNames, forKey: .galleryNames)
         // passwordHash is intentionally omitted — AppSettings.tabs writes it
-        // to Keychain directly whenever a tab's hash changes.
+        // to the secret store directly whenever a tab's hash changes.
     }
 }
 
