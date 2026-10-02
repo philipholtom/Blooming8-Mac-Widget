@@ -384,10 +384,23 @@ struct LibraryGrid: View {
     }
 
     private var countBar: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text(countLabel)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if library.isLoadingMore {
+                ProgressView().controlSize(.small)
+                Text("Loading more…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let notice = library.loadNotice {
+                Label(notice, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Button("Retry") { library.reloadCurrentGallery() }
+                    .controlSize(.small)
+            }
             Spacer()
         }
         .padding(.horizontal, 14)

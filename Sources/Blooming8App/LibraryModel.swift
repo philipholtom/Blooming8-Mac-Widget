@@ -107,6 +107,11 @@ final class LibraryModel: ObservableObject {
     @Published var items: [LibraryItem] = []
     @Published var isLoading = false
     @Published var loadError: String?
+    /// Set when a gallery only partly loaded: the photos that did arrive stay
+    /// on screen, with this explaining why the rest isn't there.
+    @Published var loadNotice: String?
+    /// True while later pages of a gallery are still arriving.
+    @Published var isLoadingMore = false
     /// The single item the inspector shows. Plain click sets this (and
     /// clears `selectedIDs` down to just that one item); it's kept separate
     /// from multi-select so the inspector always has one unambiguous subject.
@@ -167,6 +172,8 @@ final class LibraryModel: ObservableObject {
         selection = nil
         selectedIDs = []
         loadError = nil
+        loadNotice = nil
+        isLoadingMore = false
 
         switch source {
         case .currentPhoto, .generated, .browseFiles:
@@ -289,6 +296,11 @@ final class LibraryModel: ObservableObject {
         }
     }
 
+    /// Loads the current gallery again from the start.
+    func reloadCurrentGallery() {
+        if case .gallery(let name)? = currentSource { load(.gallery(name)) }
+    }
+
     private func loadGallery(named name: String) {
         // Stale-while-revalidate: a cache hit shows instantly with no
         // spinner, then a fresh fetch runs silently underneath and updates
@@ -296,31 +308,51 @@ final class LibraryModel: ObservableObject {
         // to since your last visit still catches up, just without making
         // every single click wait on the device's slow listing endpoint.
         let cacheKey = galleryListingCacheKey(name)
+        let hadCache: Bool
         if let cachedNames = galleryListingCache[cacheKey] {
             items = cachedNames.map { LibraryItem(devicePath: "/gallerys/\(name)/\($0)", galleryName: name) }
             isLoading = false
             loadError = items.isEmpty ? "This gallery is empty." : nil
+            hadCache = true
         } else {
             isLoading = true
             items = []
+            hadCache = false
         }
 
         loadTask = Task {
+            var collected: [String] = []
             do {
-                let names = try await client.fetchAllImages(ip: settings.deviceIP, gallery: name)
+                // The frame's listing gets slower with every page, so with
+                // nothing cached the grid shows each page as it lands rather
+                // than waiting for the last one.
+                try await client.walkGalleryImages(ip: settings.deviceIP, gallery: name) { page in
+                    guard !Task.isCancelled else { return }
+                    collected.append(contentsOf: page)
+                    if !hadCache {
+                        items = collected.map { LibraryItem(devicePath: "/gallerys/\(name)/\($0)", galleryName: name) }
+                        isLoading = false
+                        isLoadingMore = true
+                    }
+                }
                 guard !Task.isCancelled else { return }
-                galleryListingCache[cacheKey] = names
-                items = names.map { LibraryItem(devicePath: "/gallerys/\(name)/\($0)", galleryName: name) }
+                galleryListingCache[cacheKey] = collected
+                items = collected.map { LibraryItem(devicePath: "/gallerys/\(name)/\($0)", galleryName: name) }
                 isLoading = false
+                isLoadingMore = false
                 loadError = items.isEmpty ? "This gallery is empty." : nil
             } catch {
                 guard !Task.isCancelled else { return }
                 isLoading = false
+                isLoadingMore = false
                 // Cached data is already on screen — a background refresh
                 // failing (the frame went to sleep, a request timed out)
                 // shouldn't replace it with an error the user didn't ask for.
-                if items.isEmpty {
+                guard !hadCache else { return }
+                if collected.isEmpty {
                     loadError = error.localizedDescription
+                } else {
+                    loadNotice = "Showing the first \(collected.count) — the frame stopped answering before the rest loaded."
                 }
             }
         }

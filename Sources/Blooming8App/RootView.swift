@@ -134,7 +134,18 @@ struct RootView: View {
     private var detailForUnlockedSource: some View {
         switch activeSource {
         case .currentPhoto:
-            CurrentPhotoPane(controller: controller, settings: settings)
+            CurrentPhotoPane(
+                controller: controller,
+                settings: settings,
+                scheduledSendManager: scheduledSendManager,
+                scheduledContentManager: scheduledContentManager,
+                openAutomationSettings: {
+                    // SettingsSheet remembers its last page under this key.
+                    UserDefaults.standard.set("Automation", forKey: "settingsSheetCategory")
+                    showSettings = true
+                },
+                openActivity: { showActivity = true }
+            )
         case .generated:
             GeneratedPane(settings: settings, controller: controller)
         case .browseFiles:

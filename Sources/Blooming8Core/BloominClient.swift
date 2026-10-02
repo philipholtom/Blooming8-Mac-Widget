@@ -77,6 +77,11 @@ public final class BloominClient {
     /// session-level configuration, not overridable per-request, hence a
     /// second session rather than a per-request override.
     private let uploadSession: URLSession
+    /// For listing a gallery and downloading images. Measured against the
+    /// real frame: listing pages get slower the further into a gallery they
+    /// are (a 166-photo gallery took 1.8s, 4.5s, 8.8s, 8.7s for its four
+    /// pages), which the default 8s limit turned into a failed load.
+    private let readSession: URLSession
     /// A whole batch rides one request, so it gets a much longer budget.
     private let batchUploadSession: URLSession
 
@@ -95,6 +100,11 @@ public final class BloominClient {
         uploadConfig.timeoutIntervalForRequest = 90
         uploadConfig.timeoutIntervalForResource = 120
         uploadSession = URLSession(configuration: uploadConfig)
+
+        let readConfig = URLSessionConfiguration.ephemeral
+        readConfig.timeoutIntervalForRequest = 45
+        readConfig.timeoutIntervalForResource = 90
+        readSession = URLSession(configuration: readConfig)
 
         let batchConfig = URLSessionConfiguration.ephemeral
         batchConfig.timeoutIntervalForRequest = 180
@@ -130,6 +140,16 @@ public final class BloominClient {
     /// probing the device directly) to fetch the next page.
     public func fetchAllImages(ip: String, gallery: String) async throws -> [String] {
         var allNames: [String] = []
+        try await walkGalleryImages(ip: ip, gallery: gallery) { allNames.append(contentsOf: $0) }
+        return allNames
+    }
+
+    /// Walks a gallery page by page, handing each page's new names to
+    /// `onPage` as soon as it arrives rather than only at the end — so a big
+    /// or slow gallery can start showing photos immediately, and a failure on
+    /// a late page doesn't throw away the earlier ones (they've already been
+    /// delivered). Throws if a page fails; pages before it were still reported.
+    public func walkGalleryImages(ip: String, gallery: String, onPage: @MainActor ([String]) -> Void) async throws {
         var seen = Set<String>()
         var cursor: String? = nil
         var pageCount = 0
@@ -148,21 +168,20 @@ public final class BloominClient {
                 queryItems.append(URLQueryItem(name: "cursor", value: cursor))
             }
             components.queryItems = queryItems
-            let (data, response) = try await session.data(from: components.url!)
+            let (data, response) = try await readSession.data(from: components.url!)
             try checkStatus(response)
             let listing = try JSONDecoder().decode(GalleryListing.self, from: data)
 
             let newNames = listing.data.map { $0.name }.filter { !seen.contains($0) }
             if newNames.isEmpty { break }
             newNames.forEach { seen.insert($0) }
-            allNames.append(contentsOf: newNames)
+            await onPage(newNames)
 
             guard listing.more == true, let next = listing.cursorNext, next != cursor else {
                 break
             }
             cursor = next
         }
-        return allNames
     }
 
     private struct ShowResponse: Decodable {
@@ -266,7 +285,7 @@ public final class BloominClient {
 
     public func fetchImageData(ip: String, path: String) async throws -> Data {
         let url = try URL(string: baseURL(ip: ip) + path)!
-        let (data, response) = try await session.data(from: url)
+        let (data, response) = try await readSession.data(from: url)
         try checkStatus(response)
         return data
     }

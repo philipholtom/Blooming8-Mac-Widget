@@ -3,10 +3,18 @@ import AppKit
 import SwiftUI
 
 /// What the frame is showing right now, with the whole-frame actions that
-/// aren't tied to one image in the library.
+/// aren't tied to one image in the library — laid out as a dashboard: the
+/// photo and what you can do with it on the left; ways to show something
+/// new, what's scheduled next, and what just happened on the right.
 struct CurrentPhotoPane: View {
     @ObservedObject var controller: PhotoController
     @ObservedObject var settings: AppSettings
+    @ObservedObject var scheduledSendManager: ScheduledSendManager
+    @ObservedObject var scheduledContentManager: ScheduledContentManager
+    /// Opens Settings on the Automation page.
+    let openAutomationSettings: () -> Void
+    /// Opens the full Activity list.
+    let openActivity: () -> Void
 
     @State private var slideshowGallery = ""
     @State private var slideshowMinutes = "5"
@@ -16,183 +24,18 @@ struct CurrentPhotoPane: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 18) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.gray.opacity(0.12))
-                    if let image = controller.previewImage {
-                        Image(nsImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    } else {
-                        VStack(spacing: 8) {
-                            Image(systemName: "photo")
-                                .font(.system(size: 44))
-                                .foregroundStyle(.tertiary)
-                            Text(settings.deviceIP.isEmpty ? "No frame configured" : "Nothing loaded yet")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+            // Side by side when there's room, stacked when the window is narrow.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 22) {
+                    photoColumn.frame(minWidth: 300, idealWidth: 400, maxWidth: 460)
+                    cardsColumn.frame(minWidth: 320, maxWidth: .infinity)
                 }
-                .frame(maxWidth: 720)
-                .frame(height: 380)
+                .frame(minWidth: 700)
 
-                if let path = controller.currentImagePath {
-                    Text(path)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
+                VStack(spacing: 22) {
+                    photoColumn
+                    cardsColumn
                 }
-
-                GroupBox("Galleries for Random Photo") {
-                    let names = controller.availableGalleryNames.sorted()
-                    if names.isEmpty {
-                        Text(controller.galleries.isEmpty ? "No galleries loaded yet." : "No unlocked galleries available.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(6)
-                    } else {
-                        // This is the same settings.selectedGalleries the
-                        // widget's own checkboxes read and write — shared
-                        // settings, so checking a gallery here also checks it
-                        // there. Random Photo had no way to see or change
-                        // this from the app at all before; it silently used
-                        // whatever the widget last had checked.
-                        VStack(alignment: .leading, spacing: 3) {
-                            ForEach(names, id: \.self) { name in
-                                Toggle(name, isOn: gallerySelectionBinding(for: name))
-                                    .toggleStyle(.checkbox)
-                                    .font(.caption)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(6)
-                    }
-                }
-                .frame(maxWidth: 720)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Randomize by")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker("Randomize by", selection: $settings.randomWeighting) {
-                        ForEach(RandomWeighting.allCases) { option in
-                            Text(option.label).tag(option)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 260)
-                }
-
-                GroupBox("Show a Photo") {
-                    VStack(spacing: 10) {
-                        HStack(spacing: 10) {
-                            Button {
-                                Task { await controller.showRandomPhoto() }
-                            } label: {
-                                Label("Random Photo", systemImage: "shuffle")
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(controller.isBusy)
-                            .help("Shows a random photo immediately, no preview step")
-
-                            Button {
-                                showRandomPhotoPicker = true
-                            } label: {
-                                Label("Random 3", systemImage: "square.grid.3x1.below.line.grid.1x2")
-                            }
-                            .disabled(controller.isBusy)
-                            .help("Picks 3 random photos to choose from, with Next for 3 more")
-                        }
-
-                        HStack(spacing: 10) {
-                            Button {
-                                showLocalFolderPicker = true
-                            } label: {
-                                Label("From Local Folder", systemImage: "folder")
-                            }
-                            .disabled(controller.isBusy || settings.randomFolderPath.isEmpty || isLocalFolderLocked)
-                            .help(localFolderButtonHelp)
-
-                            Button {
-                                showFavoritesPicker = true
-                            } label: {
-                                Label("From Favourites", systemImage: "star")
-                            }
-                            .disabled(controller.isBusy || settings.favoriteImagePaths.isEmpty || isLocalFolderLocked)
-                            .help(settings.favoriteImagePaths.isEmpty
-                                ? "No favourites yet"
-                                : (isLocalFolderLocked ? "Favourites are locked — unlock them from the sidebar first" : "Picks 3 random favourites to choose from, with Next for 3 more"))
-                        }
-                    }
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity)
-                    .padding(8)
-                }
-                .frame(maxWidth: 720)
-
-                GroupBox("This Photo") {
-                    HStack(spacing: 10) {
-                        Button("Redisplay") {
-                            Task { await controller.redisplayCurrentPhoto() }
-                        }
-                        .disabled(controller.isBusy)
-
-                        Button("Show Next") {
-                            Task { await controller.showNextImage() }
-                        }
-                        .disabled(controller.isBusy)
-
-                        Button("Save Photo…") { savePhoto() }
-                            .disabled(controller.currentImageData == nil)
-
-                        Button {
-                            toggleCurrentImageFavorite()
-                        } label: {
-                            Label(
-                                isCurrentImageFavorited ? "Remove from Favorites" : "Add to Favorites",
-                                systemImage: isCurrentImageFavorited ? "star.slash" : "star"
-                            )
-                        }
-                        .disabled(controller.currentLocalSourceURL == nil)
-                        .help(controller.currentLocalSourceURL == nil
-                            ? "Only available for photos sent from Local Folder — Favorites is a bookmark list of local files"
-                            : (isCurrentImageFavorited ? "Remove this photo from Favorites" : "Add this photo to Favorites"))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(8)
-                }
-                .frame(maxWidth: 720)
-
-                GroupBox("Slideshow") {
-                    HStack(spacing: 8) {
-                        Picker("Gallery", selection: $slideshowGallery) {
-                            ForEach(controller.galleries, id: \.self) { Text($0).tag($0) }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: 220)
-
-                        TextField("min", text: $slideshowMinutes)
-                            .frame(width: 52)
-                        Text("min").foregroundStyle(.secondary)
-
-                        Button("Start") {
-                            let minutes = Int(slideshowMinutes) ?? 5
-                            Task { await controller.startSlideshow(gallery: slideshowGallery, durationSeconds: minutes * 60) }
-                        }
-                        .disabled(slideshowGallery.isEmpty)
-
-                        Button("Stop") {
-                            Task { await controller.stopSlideshow() }
-                        }
-                    }
-                    .padding(6)
-                }
-                .frame(maxWidth: 720)
             }
             .padding(24)
             .frame(maxWidth: .infinity)
@@ -211,6 +54,315 @@ struct CurrentPhotoPane: View {
         }
     }
 
+    // MARK: - Left: the photo and what to do with it
+
+    private var photoColumn: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.gray.opacity(0.12))
+                if let image = controller.previewImage {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 44))
+                            .foregroundStyle(.tertiary)
+                        Text(settings.deviceIP.isEmpty ? "No frame configured" : "Nothing loaded yet")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .aspectRatio(3.0 / 4.0, contentMode: .fit)
+
+            if let path = controller.currentImagePath {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text((path as NSString).lastPathComponent)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let gallery = controller.currentGalleryOnDevice {
+                        Text("in \(gallery)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .textSelection(.enabled)
+                .help(path)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    Task { await controller.redisplayCurrentPhoto() }
+                } label: {
+                    Label("Redisplay", systemImage: "arrow.clockwise")
+                }
+                .disabled(controller.isBusy)
+                .help("Send the current photo to the screen again")
+
+                Button {
+                    Task { await controller.showNextImage() }
+                } label: {
+                    Label("Next", systemImage: "forward")
+                }
+                .disabled(controller.isBusy)
+                .help("Advance the frame's own slideshow or playlist by one")
+
+                Button {
+                    toggleCurrentImageFavorite()
+                } label: {
+                    Label(
+                        isCurrentImageFavorited ? "Unfavorite" : "Favorite",
+                        systemImage: isCurrentImageFavorited ? "star.slash" : "star"
+                    )
+                }
+                .disabled(controller.currentLocalSourceURL == nil)
+                .help(controller.currentLocalSourceURL == nil
+                    ? "Only available for photos sent from Local Folder — Favorites is a bookmark list of local files"
+                    : (isCurrentImageFavorited ? "Remove this photo from Favorites" : "Add this photo to Favorites"))
+
+                Button {
+                    savePhoto()
+                } label: {
+                    Label("Save…", systemImage: "square.and.arrow.down")
+                }
+                .disabled(controller.currentImageData == nil)
+                .help("Save a copy of this photo to your Mac")
+            }
+            .controlSize(.regular)
+        }
+    }
+
+    // MARK: - Right: cards
+
+    private var cardsColumn: some View {
+        VStack(spacing: 14) {
+            showSomethingNewCard
+            comingUpCard
+            recentActivityCard
+            randomSourcesCard
+            slideshowCard
+        }
+    }
+
+    private var showSomethingNewCard: some View {
+        GroupBox("Show something new") {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                Button {
+                    Task { await controller.showRandomPhoto() }
+                } label: {
+                    Label("Random photo", systemImage: "shuffle").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(controller.isBusy)
+                .help("Shows a random photo immediately, no preview step")
+
+                Button {
+                    showRandomPhotoPicker = true
+                } label: {
+                    Label("Random 3", systemImage: "square.grid.3x1.below.line.grid.1x2").frame(maxWidth: .infinity)
+                }
+                .disabled(controller.isBusy)
+                .help("Picks 3 random photos to choose from, with Next for 3 more")
+
+                Button {
+                    Task { await controller.fireScheduledContent(ScheduledContent(sourceID: "apod", useToday: true)) }
+                } label: {
+                    Label("Today's NASA", systemImage: "moon.stars").frame(maxWidth: .infinity)
+                }
+                .disabled(controller.isBusy || settings.deviceIP.isEmpty)
+                .help("Shows NASA's actual picture of the day, framed with its description")
+
+                Button {
+                    showLocalFolderPicker = true
+                } label: {
+                    Label("From folder", systemImage: "folder").frame(maxWidth: .infinity)
+                }
+                .disabled(controller.isBusy || settings.randomFolderPath.isEmpty || isLocalFolderLocked)
+                .help(localFolderButtonHelp)
+
+                Button {
+                    showFavoritesPicker = true
+                } label: {
+                    Label("From favourites", systemImage: "star").frame(maxWidth: .infinity)
+                }
+                .disabled(controller.isBusy || settings.favoriteImagePaths.isEmpty || isLocalFolderLocked)
+                .help(settings.favoriteImagePaths.isEmpty
+                    ? "No favourites yet"
+                    : (isLocalFolderLocked ? "Favourites are locked — unlock them from the sidebar first" : "Picks 3 random favourites to choose from, with Next for 3 more"))
+            }
+            .controlSize(.large)
+            .padding(8)
+        }
+    }
+
+    private var comingUpCard: some View {
+        GroupBox("Coming up") {
+            VStack(alignment: .leading, spacing: 8) {
+                if scheduleRows.isEmpty {
+                    Text("Nothing scheduled.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(scheduleRows) { row in
+                        HStack(spacing: 8) {
+                            Image(systemName: row.symbol)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 18)
+                            Text(row.title)
+                                .lineLimit(1)
+                            Spacer()
+                            Text(row.when)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.callout)
+                    }
+                }
+                Button("Set up schedules…", action: openAutomationSettings)
+                    .buttonStyle(.link)
+                    .font(.caption)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
+        }
+    }
+
+    private struct ScheduleRow: Identifiable {
+        let id: String
+        let symbol: String
+        let title: String
+        let when: String
+    }
+
+    /// One row per schedule that is actually switched on and has a next time.
+    private var scheduleRows: [ScheduleRow] {
+        var rows: [ScheduleRow] = []
+        if let content = settings.scheduledContent, content.isEnabled, let next = scheduledContentManager.nextFireDate {
+            let source = ContentSources.all.first(where: { $0.id == content.sourceID })
+            let suffix = (content.useToday && source is TodayContentSource) ? " (today's)" : ""
+            rows.append(ScheduleRow(id: "content", symbol: "sparkles", title: (source?.displayName ?? "Generated picture") + suffix, when: Self.describe(next)))
+        }
+        if let send = settings.scheduledSend, send.isEnabled, let next = scheduledSendManager.nextFireDate {
+            let name = send.devicePath.isEmpty ? "Scheduled photo" : (send.devicePath as NSString).lastPathComponent
+            rows.append(ScheduleRow(id: "send", symbol: "clock", title: name, when: Self.describe(next)))
+        }
+        if settings.autoRandomEnabled, let next = controller.nextAutoRandomFireDate {
+            rows.append(ScheduleRow(id: "auto", symbol: "arrow.triangle.2.circlepath", title: "Auto random photo", when: Self.describe(next)))
+        }
+        return rows
+    }
+
+    /// "Today 17:00", "Tomorrow 07:00", or "Mon 07:00".
+    private static func describe(_ date: Date) -> String {
+        let time = date.formatted(date: .omitted, time: .shortened)
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Today \(time)" }
+        if calendar.isDateInTomorrow(date) { return "Tomorrow \(time)" }
+        return "\(date.formatted(.dateTime.weekday(.abbreviated))) \(time)"
+    }
+
+    private var recentActivityCard: some View {
+        GroupBox("Recent activity") {
+            VStack(alignment: .leading, spacing: 8) {
+                if controller.recentActivity.isEmpty {
+                    Text("Nothing yet this session.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(controller.recentActivity.prefix(3)) { event in
+                        HStack(spacing: 8) {
+                            Image(systemName: event.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(event.success ? Color.green : Color.red)
+                                .frame(width: 18)
+                            Text(event.message)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer()
+                            Text(event.date.formatted(date: .omitted, time: .shortened))
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.callout)
+                    }
+                }
+                Button("View all activity…", action: openActivity)
+                    .buttonStyle(.link)
+                    .font(.caption)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
+        }
+    }
+
+    /// Which galleries "Random photo" draws from — kept, but collapsed to one
+    /// line until you want to change it.
+    private var randomSourcesCard: some View {
+        GroupBox {
+            DisclosureGroup("Random photo sources · \(settings.selectedGalleries.intersection(controller.availableGalleryNames).count) galleries") {
+                let names = controller.availableGalleryNames.sorted()
+                if names.isEmpty {
+                    Text(controller.galleries.isEmpty ? "No galleries loaded yet." : "No unlocked galleries available.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 6)
+                } else {
+                    VStack(alignment: .leading, spacing: 3) {
+                        // This is the same settings.selectedGalleries the
+                        // widget's own checkboxes read and write — shared
+                        // settings, so checking a gallery here also checks it
+                        // there.
+                        ForEach(names, id: \.self) { name in
+                            Toggle(name, isOn: gallerySelectionBinding(for: name))
+                                .toggleStyle(.checkbox)
+                                .font(.caption)
+                        }
+                        Picker("Randomize by", selection: $settings.randomWeighting) {
+                            ForEach(RandomWeighting.allCases) { option in
+                                Text(option.label).tag(option)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.top, 8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 6)
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    private var slideshowCard: some View {
+        GroupBox("Slideshow on the frame") {
+            HStack(spacing: 8) {
+                Picker("Gallery", selection: $slideshowGallery) {
+                    ForEach(controller.galleries, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 200)
+
+                TextField("min", text: $slideshowMinutes)
+                    .frame(width: 44)
+                Text("min").foregroundStyle(.secondary)
+
+                Button("Start") {
+                    let minutes = Int(slideshowMinutes) ?? 5
+                    Task { await controller.startSlideshow(gallery: slideshowGallery, durationSeconds: minutes * 60) }
+                }
+                .disabled(slideshowGallery.isEmpty)
+
+                Button("Stop") {
+                    Task { await controller.stopSlideshow() }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(6)
+        }
+    }
+
     /// Same lock Local Folder itself sits behind (see Sidebar's identical
     /// check) — this button reaches the same content from outside that
     /// view, so it needs the same gate rather than offering a side door
@@ -222,7 +374,7 @@ struct CurrentPhotoPane: View {
     private var localFolderButtonHelp: String {
         if settings.randomFolderPath.isEmpty { return "Choose a Local Folder in Settings first" }
         if isLocalFolderLocked { return "Local Folder is locked — unlock it from the sidebar first" }
-        return "Picks one random photo or video from Local Folder"
+        return "Picks 3 random photos from Local Folder to choose from"
     }
 
     private var isCurrentImageFavorited: Bool {
