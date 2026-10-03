@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        MuseumCardServer.shared.start(settings: settings)
 
         // A menu bar app has no visible windows, so macOS App Nap would
         // otherwise throttle its timers — this keeps the auto-random

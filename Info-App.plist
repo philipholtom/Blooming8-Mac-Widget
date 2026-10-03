@@ -30,9 +30,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.29</string>
+	<string>1.30</string>
 	<key>CFBundleVersion</key>
-	<string>30</string>
+	<string>31</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>NSAppTransportSecurity</key>
@@ -42,6 +42,10 @@
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Blooming8 uses Bluetooth to send a wake pulse to your photo frame when it's asleep, so it can reconnect over Wi-Fi.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_b8cards._tcp</string>
+	</array>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>

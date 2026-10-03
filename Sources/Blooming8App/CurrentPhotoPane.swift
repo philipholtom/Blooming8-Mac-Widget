@@ -142,6 +142,10 @@ struct CurrentPhotoPane: View {
                 .help("Save a copy of this photo to your Mac")
             }
             .controlSize(.regular)
+
+            if let path = controller.currentImagePath {
+                MuseumCardEditor(path: path, localSourceURL: controller.currentLocalSourceURL)
+            }
         }
     }
 

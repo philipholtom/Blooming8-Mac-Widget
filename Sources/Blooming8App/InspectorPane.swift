@@ -44,6 +44,7 @@ struct InspectorPane: View {
 
                 Divider()
                 actions
+                MuseumCardPreview(item: item)
             }
             .padding(14)
         }

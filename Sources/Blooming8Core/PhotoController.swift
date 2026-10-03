@@ -373,6 +373,7 @@ public final class PhotoController: ObservableObject {
             while start < urls.count {
                 let end = min(start + batchSize, urls.count)
                 var batch: [(filename: String, data: Data)] = []
+                var sourceURLs: [String: URL] = [:]
                 let batchURLs = Array(urls[start..<end])
                 statusText = "Preparing photos \(start + 1)–\(end) of \(urls.count)..."
                 // Decoding and rendering full-size photos is the slow part;
@@ -403,6 +404,7 @@ public final class PhotoController: ObservableObject {
                         filename = orientedFilename("\(baseName)_\(Int(Date().timeIntervalSince1970 * 1000))_\(start + offset)")
                     }
                     batch.append((filename, jpeg))
+                    sourceURLs[filename] = url
                 }
                 start = end
                 guard !batch.isEmpty else { continue }
@@ -415,13 +417,16 @@ public final class PhotoController: ObservableObject {
                 for file in batch {
                     // Anything the batch didn't confirm (or the whole batch, if
                     // it failed outright) gets the proven single-file path.
+                    let cardPath = "/gallerys/\(trimmedGallery)/\(file.filename)"
                     if confirmed.contains(file.filename) || confirmed.contains(file.filename + ".jpg") {
                         uploaded += 1
+                        MuseumCardStore.shared.autoFill(path: cardPath, metadata: sourceURLs[file.filename].flatMap(PhotoMetadata.read(from:)))
                         continue
                     }
                     do {
                         _ = try await client.uploadImage(ip: settings.deviceIP, filename: file.filename, gallery: trimmedGallery, imageData: file.data, showNow: false)
                         uploaded += 1
+                        MuseumCardStore.shared.autoFill(path: cardPath, metadata: sourceURLs[file.filename].flatMap(PhotoMetadata.read(from:)))
                     } catch {
                         failed += 1
                     }
@@ -1181,6 +1186,9 @@ public final class PhotoController: ObservableObject {
         /// already on the frame, just display it instead of uploading a
         /// second copy.
         public var sourceKey: String? = nil
+        /// Metadata for the museum card, for candidates whose `fileURL`
+        /// isn't a real file to read it from (Photos-library images).
+        public var sourceMetadata: PhotoMetadata? = nil
     }
 
     /// `path|modified|size|crop|WxH` for a local file, hashed to 8 hex chars.
@@ -1486,6 +1494,7 @@ public final class PhotoController: ObservableObject {
         }
         let safeName = sanitizeFilenameComponent(displayName)
         var candidate = LocalFolderCandidate(fileURL: URL(fileURLWithPath: safeName), image: framed, jpegData: jpeg, gallery: "Apple", isLocalFile: false)
+        candidate.sourceMetadata = PhotoMetadata.read(from: data)
         if let assetID {
             candidate.sourceKey = Self.sourceKey(forPhotosAsset: assetID, cropLandscapePhotos: settings.cropLandscapePhotos, width: settings.renderWidth, height: settings.renderHeight)
         }
@@ -1500,13 +1509,13 @@ public final class PhotoController: ObservableObject {
         let width = settings.renderWidth
         let height = settings.renderHeight
         let crop = settings.cropLandscapePhotos
-        let rendered: [(image: NSImage, jpeg: Data, displayName: String, assetID: String)] = await Task.detached(priority: .userInitiated) { [weak self] in
+        let rendered: [(image: NSImage, jpeg: Data, displayName: String, assetID: String, metadata: PhotoMetadata?)] = await Task.detached(priority: .userInitiated) { [weak self] in
             items.compactMap { item in
                 guard let cgImage = loadUprightCGImage(data: item.data),
                       let framed = self?.renderForFrame(cgImage: cgImage, width: width, height: height, cropLandscapePhotos: crop),
                       let jpeg = ImageCanvas.jpegData(framed)
                 else { return nil }
-                return (framed, jpeg, item.displayName, item.assetID)
+                return (framed, jpeg, item.displayName, item.assetID, PhotoMetadata.read(from: item.data))
             }
         }.value
 
@@ -1517,6 +1526,7 @@ public final class PhotoController: ObservableObject {
                 image: item.image, jpegData: item.jpeg, gallery: "Apple", isLocalFile: false
             )
             candidate.sourceKey = Self.sourceKey(forPhotosAsset: item.assetID, cropLandscapePhotos: crop, width: width, height: height)
+            candidate.sourceMetadata = item.metadata
             candidates.append(candidate)
         }
         guard !candidates.isEmpty else {
@@ -1590,6 +1600,7 @@ public final class PhotoController: ObservableObject {
                         currentImagePath = existingPath
                         currentLocalSourceURL = candidate.isLocalFile ? candidate.fileURL : nil
                         currentGalleryOnDevice = gallery
+                        MuseumCardStore.shared.autoFill(path: existingPath, metadata: cardMetadata(for: candidate))
                         statusText = "✓ Already on the frame — displayed \(filename) without uploading again"
                         logActivity("Displayed \(filename) — already on the frame", success: true)
                         localFolderCandidates = []
@@ -1622,6 +1633,7 @@ public final class PhotoController: ObservableObject {
             currentImagePath = path
             currentLocalSourceURL = candidate.isLocalFile ? candidate.fileURL : nil
             currentGalleryOnDevice = gallery
+            MuseumCardStore.shared.autoFill(path: path, metadata: cardMetadata(for: candidate))
             statusText = "← /upload OK\n✓ Displayed \(filename)"
             logActivity("Uploaded and displayed \(filename)", success: true)
 
@@ -1631,6 +1643,13 @@ public final class PhotoController: ObservableObject {
             statusText = "✗ Upload error: \(error.localizedDescription)\n(File: \(candidate.fileURL.lastPathComponent))"
             logActivity("Couldn't upload \(candidate.fileURL.lastPathComponent): \(error.localizedDescription)", success: false)
         }
+    }
+
+    /// Where a candidate's museum-card metadata comes from: the file itself
+    /// for local photos, or what was captured when a Photos-library image
+    /// was prepared.
+    private func cardMetadata(for candidate: LocalFolderCandidate) -> PhotoMetadata? {
+        candidate.isLocalFile ? PhotoMetadata.read(from: candidate.fileURL) : candidate.sourceMetadata
     }
 
     /// Ensures `gallery` exists and uploads `imageData` to it, retrying the

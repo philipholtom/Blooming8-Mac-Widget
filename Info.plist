@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.16</string>
+	<string>1.17</string>
 	<key>CFBundleVersion</key>
-	<string>17</string>
+	<string>18</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>LSUIElement</key>
@@ -29,6 +29,10 @@
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Blooming8 Widget uses Bluetooth to send a wake pulse to your photo frame when it's asleep, so it can reconnect over Wi-Fi.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_b8cards._tcp</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Blooming8 Widget connects to your Blooming8 photo frame over your local Wi-Fi network to show the current photo and display new ones.</string>
 </dict>

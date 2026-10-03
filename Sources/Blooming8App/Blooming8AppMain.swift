@@ -19,6 +19,7 @@ final class AppEnvironment: ObservableObject {
         self.controller = PhotoController(settings: settings)
         self.scheduledSendManager = ScheduledSendManager(controller: controller, settings: settings)
         self.scheduledContentManager = ScheduledContentManager(controller: controller, settings: settings)
+        MuseumCardServer.shared.start(settings: settings)
     }
 }
 
