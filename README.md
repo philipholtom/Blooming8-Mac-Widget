@@ -19,6 +19,7 @@ Shared by both apps:
 - **Bluetooth wake** — sends a BLE pulse to bring the frame's Wi-Fi radio back up when it's asleep, and retries automatically once it's reachable.
 - **Local Folder** — pick from photos (and videos, in the app) on your Mac instead of a gallery already on the frame.
 - **Favorites** — mark local photos for quick, repeated access without re-browsing.
+- **Museum cards** — every photo you send gets a little museum-style label (title, place, date, camera) built from its EXIF, ready for a companion e-paper display beside the frame. See [Museum cards and the CrowPanel display](#museum-cards-and-the-crowpanel-display).
 - **Crop or letterbox landscape photos** — a landscape photo on the frame's portrait screen can either show in full with black bars, or crop and center to fill the screen (your choice, per-user setting).
 
 Widget-only:
@@ -32,6 +33,7 @@ App-only (the windowed app), for cases the popover was never going to handle wel
 - **Delete images from a device gallery** directly, with confirmation.
 - **Drag-and-drop upload** onto the grid while browsing a gallery.
 - **Video screenshots** — Local Folder also scans local movies (mp4/mov/m4v); pick a video to pull a handful of frames spread across it, "Next" for a different set, and confirm before sending.
+- **Museum card editor and preview** — edit the card for what's on the frame in the On the Frame pane, and see the card a photo will get under Send to Frame before you send it.
 - **Live "on the frame" badge** on whichever grid cell matches what's currently displayed.
 - Cached gallery listings and thumbnails, so revisiting a folder or gallery you've already opened is instant rather than re-fetching everything.
 
@@ -80,10 +82,25 @@ Settings are shared between both apps (one `UserDefaults` suite) — configure e
 
 To launch the widget automatically at login, add `/Applications/Blooming8Widget.app` in System Settings → General → Login Items.
 
+## Museum cards and the CrowPanel display
+
+A small companion e-paper screen (an [Elecrow CrowPanel 2.13"](https://www.elecrow.com/wiki/CrowPanel_ESP32_E-Paper_HMI_2.13-inch_Display.html), ESP32-S3) sits next to the frame and shows a label for whatever photo is on it, like the cards beside paintings in a museum. Its buttons double as a remote: random photo, pick a gallery, wake the frame.
+
+- **Where cards come from** — when a photo is sent, the app reads its EXIF/IPTC (title or caption, date taken, GPS, camera and lens) and reverse-geocodes the location with Apple's geocoder: "Landmark, City, Country" when there's a known point of interest, otherwise "City, Country". Anything you type in the card editor wins from then on.
+- **Where they live** — `~/Library/Application Support/Blooming8/museum_cards.json`, keyed by the photo's path on the frame (e.g. `/gallerys/Apple/IMG_1234-ab12cd34_P.jpg`), since that path is the one identifier the frame, the Mac and the display all share.
+- **How the display gets them** — whichever of the two apps is running serves them on port 8738 (also advertised over Bonjour as `_b8cards._tcp`):
+  - `GET /version` — a number that changes whenever the cards (or the locked galleries) change
+  - `GET /cards` — every card, plus `hiddenGalleries`: the galleries in password-locked tabs, which the display never offers
+- **Pull, not push** — the display runs on battery and spends almost all its time in deep sleep, so it can't be pushed to. It wakes every 15 minutes or on a button press, asks the frame what's showing, re-downloads the cards only if the version changed, and keeps its own copy so it can still label photos while the Mac is off.
+- **Networking** — the display has to be able to reach the Mac. If the frame lives on a separate network that can't route back to the Mac's, join the Mac's Wi-Fi to the frame's network too and give it a fixed address there.
+
+The display's firmware isn't part of this repo.
+
 ## Security notes
 
 - The frame's HTTP API has no authentication of its own — anyone on your local network can talk to it directly. Neither app adds any security to the frame itself.
 - Gallery tab passwords and the Local Folder password are convenience features only: they gate each app's own UI (a locked tab's galleries won't show, randomize, or browse until unlocked) but don't touch the frame's actual access control. Don't rely on them for genuinely sensitive photos.
+- The museum card server (port 8738) has no authentication either: anyone on your local network can read the card text and the names of locked galleries. It's read-only.
 - Unlocking a tab is per-app-process and in-memory only — unlocking it in the widget doesn't unlock it in the windowed app, or vice versa, and it re-locks on relaunch.
 
 ## Project structure
@@ -94,6 +111,8 @@ Sources/Blooming8Core/       shared engine — device client, controller, settin
   PhotoController.swift        app state and business logic
   AppSettings.swift            persisted settings (shared UserDefaults suite)
   GalleryTab.swift             gallery tab / password model
+  MuseumCard.swift             museum cards: store, EXIF reading, place names
+  MuseumCardServer.swift       serves cards to the CrowPanel display (port 8738)
   BLEWaker.swift                CoreBluetooth wake pulse
   ImageFolder.swift             local image scanning + thumbnail caching
   VideoFrames.swift             local video scanning + frame extraction
@@ -109,6 +128,7 @@ Sources/Blooming8App/        the windowed app
   RootView.swift, Sidebar.swift   sidebar navigation
   LibraryModel.swift, LibraryGrid.swift, InspectorPane.swift   the image grid + detail pane
   VideoFramePickerSheet.swift     video screenshot picker
+  MuseumCardEditor.swift, MuseumCardPreview.swift   edit / preview museum cards
   SettingsSheet.swift, LockedGalleryPrompt.swift
 
 Resources/AppIcon.icns       shared app icon
