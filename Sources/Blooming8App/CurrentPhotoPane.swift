@@ -21,6 +21,7 @@ struct CurrentPhotoPane: View {
     @State private var showLocalFolderPicker = false
     @State private var showFavoritesPicker = false
     @State private var showRandomPhotoPicker = false
+    @State private var showOnThisDayPicker = false
 
     var body: some View {
         ScrollView {
@@ -51,6 +52,9 @@ struct CurrentPhotoPane: View {
         }
         .sheet(isPresented: $showRandomPhotoPicker) {
             RandomPhotoPickerSheet(controller: controller)
+        }
+        .sheet(isPresented: $showOnThisDayPicker) {
+            LocalFolderCandidatePickerSheet(controller: controller, source: .photosOnThisDay)
         }
     }
 
@@ -182,6 +186,14 @@ struct CurrentPhotoPane: View {
                 .help("Shows NASA's actual picture of the day, framed with its description")
 
                 Button {
+                    showOnThisDayPicker = true
+                } label: {
+                    Label("On this day", systemImage: "calendar").frame(maxWidth: .infinity)
+                }
+                .disabled(controller.isBusy)
+                .help("Photos from your Photos library taken on today's date in earlier years — pick one of 3")
+
+                Button {
                     showLocalFolderPicker = true
                 } label: {
                     Label("From folder", systemImage: "folder").frame(maxWidth: .infinity)
@@ -249,7 +261,10 @@ struct CurrentPhotoPane: View {
         if let content = settings.scheduledContent, content.isEnabled, let next = scheduledContentManager.nextFireDate {
             let source = ContentSources.all.first(where: { $0.id == content.sourceID })
             let suffix = (content.useToday && source is TodayContentSource) ? " (today's)" : ""
-            rows.append(ScheduleRow(id: "content", symbol: "sparkles", title: (source?.displayName ?? "Generated picture") + suffix, when: Self.describe(next)))
+            let title = content.sourceID == ScheduledContent.onThisDayPhotosSourceID
+                ? "On this day (Photos)"
+                : (source?.displayName ?? "Generated picture") + suffix
+            rows.append(ScheduleRow(id: "content", symbol: "sparkles", title: title, when: Self.describe(next)))
         }
         if let send = settings.scheduledSend, send.isEnabled, let next = scheduledSendManager.nextFireDate {
             let name = send.devicePath.isEmpty ? "Scheduled photo" : (send.devicePath as NSString).lastPathComponent

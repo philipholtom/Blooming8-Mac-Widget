@@ -18,12 +18,19 @@ struct LocalFolderCandidatePickerSheet: View {
         /// Random from Here, in the Browse Files tab — recursive from
         /// whatever folder was being browsed, not the fixed Local Folder path.
         case folder(URL)
+        /// Photos from the Apple Photos library: one album, or the whole
+        /// library when `id` is nil.
+        case photosAlbum(id: String?, title: String)
+        /// Photos taken on today's date in earlier years.
+        case photosOnThisDay
 
         var title: String {
             switch self {
             case .localFolder: return "Random from Local Folder"
             case .favorites: return "Random from Favourites"
             case .folder(let url): return "Random from '\(url.lastPathComponent)'"
+            case .photosAlbum(_, let title): return "Random from \(title)"
+            case .photosOnThisDay: return "On this day"
             }
         }
     }
@@ -43,6 +50,8 @@ struct LocalFolderCandidatePickerSheet: View {
     @State private var isSending = false
     @State private var selected: PhotoController.LocalFolderCandidate?
     @State private var fetchError: String?
+    /// For the Photos sources: the asset IDs to pick from, fetched once.
+    @State private var photoPool: [String]?
     @State private var showCrop = false
     /// The crop last applied to `selected`, so reopening the crop window
     /// starts from it rather than from the centre.
@@ -206,6 +215,51 @@ struct LocalFolderCandidatePickerSheet: View {
         }
     }
 
+    /// Picks up to 3 random photos from the album (or "on this day" set),
+    /// fetches their originals — downloading from iCloud if they aren't on
+    /// this Mac — and hands them to the controller to render for the frame.
+    private func preparePhotos() async {
+        guard await PhotosLibrarySource.requestAccess() else {
+            controller.statusText = "Photos access denied. Enable it for Blooming8 in System Settings → Privacy & Security → Photos."
+            return
+        }
+        if photoPool == nil {
+            let source = self.source
+            photoPool = await Task.detached(priority: .userInitiated) { () -> [String] in
+                switch source {
+                case .photosAlbum(let id?, _):
+                    return PhotosLibrarySource.fetchImageAssets(inAlbum: id).map(\.localIdentifier)
+                case .photosOnThisDay:
+                    let exact = PhotosLibrarySource.fetchOnThisDay()
+                    let assets = exact.isEmpty ? PhotosLibrarySource.fetchOnThisDay(toleranceDays: 3) : exact
+                    return assets.map(\.localIdentifier)
+                default:
+                    return PhotosLibrarySource.fetchAllImageAssets().map(\.localIdentifier)
+                }
+            }.value
+        }
+        guard let pool = photoPool, !pool.isEmpty else {
+            if case .photosOnThisDay = source {
+                controller.statusText = "No photos from this day in earlier years."
+            } else {
+                controller.statusText = "No photos found there."
+            }
+            return
+        }
+
+        let picks = Array(pool.shuffled().prefix(3))
+        var items: [(data: Data, displayName: String, assetID: String)] = []
+        await withTaskGroup(of: (String, Data?).self) { group in
+            for id in picks {
+                group.addTask { (id, await PhotosLibrarySource.fetchOriginalData(assetID: id)) }
+            }
+            for await (id, data) in group {
+                if let data { items.append((data, PhotosLibrarySource.displayName(forAssetID: id), id)) }
+            }
+        }
+        await controller.preparePhotosCandidates(items)
+    }
+
     private func refresh() async {
         // First load shows the full-screen spinner; a "Next" re-fetch keeps
         // the current set dimmed underneath instead, so it doesn't flash to
@@ -221,6 +275,7 @@ struct LocalFolderCandidatePickerSheet: View {
         case .localFolder: controller.prepareLocalFolderCandidate()
         case .favorites: controller.prepareFavoritesCandidate()
         case .folder(let url): controller.prepareCandidate(fromFolder: url)
+        case .photosAlbum, .photosOnThisDay: await preparePhotos()
         }
         let deadline = Date().addingTimeInterval(15)
         while controller.localFolderCandidates.isEmpty && Date() < deadline {

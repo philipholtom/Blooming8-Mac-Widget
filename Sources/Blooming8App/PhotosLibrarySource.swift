@@ -45,6 +45,97 @@ enum PhotosLibrarySource {
         return assets
     }
 
+    // MARK: - Albums and "on this day"
+
+    struct PhotoAlbum: Identifiable, Hashable {
+        enum Kind { case smart, user, shared }
+        /// `PHAssetCollection.localIdentifier`.
+        let id: String
+        let title: String
+        let kind: Kind
+        /// Number of still images in it (videos aren't sent to the frame).
+        let count: Int
+    }
+
+    private static func imageOptions(newestFirst: Bool = true) -> PHFetchOptions {
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: !newestFirst)]
+        options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        return options
+    }
+
+    /// The albums worth offering: Favourites and Recently Added, then the
+    /// user's own albums and shared albums. Empty ones are left out. Safe off
+    /// the main thread.
+    static func fetchAlbums() -> [PhotoAlbum] {
+        var albums: [PhotoAlbum] = []
+        func collect(_ result: PHFetchResult<PHAssetCollection>, kind: PhotoAlbum.Kind) {
+            result.enumerateObjects { collection, _, _ in
+                let count = PHAsset.fetchAssets(in: collection, options: imageOptions()).count
+                guard count > 0 else { return }
+                albums.append(PhotoAlbum(id: collection.localIdentifier, title: collection.localizedTitle ?? "Untitled", kind: kind, count: count))
+            }
+        }
+        for subtype in [PHAssetCollectionSubtype.smartAlbumFavorites, .smartAlbumRecentlyAdded] {
+            collect(PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: subtype, options: nil), kind: .smart)
+        }
+        collect(PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil), kind: .user)
+        collect(PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumCloudShared, options: nil), kind: .shared)
+        return albums
+    }
+
+    /// Every image in one album, newest first.
+    static func fetchImageAssets(inAlbum albumID: String) -> [PHAsset] {
+        guard let collection = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumID], options: nil).firstObject else { return [] }
+        return enumerate(PHAsset.fetchAssets(in: collection, options: imageOptions()))
+    }
+
+    /// Photos taken on `date`'s month and day in any earlier year (newest
+    /// first), widened by `toleranceDays` either side. Fetches one narrow
+    /// date range per year back to the oldest photo, rather than scanning the
+    /// whole library.
+    static func fetchOnThisDay(date: Date = Date(), toleranceDays: Int = 0) -> [PHAsset] {
+        let calendar = Calendar.current
+        let parts = calendar.dateComponents([.month, .day], from: date)
+        let thisYear = calendar.component(.year, from: date)
+
+        let oldestOptions = imageOptions(newestFirst: false)
+        oldestOptions.fetchLimit = 1
+        guard let oldest = PHAsset.fetchAssets(with: oldestOptions).firstObject?.creationDate else { return [] }
+        let oldestYear = calendar.component(.year, from: oldest)
+        guard oldestYear < thisYear else { return [] }
+
+        var assets: [PHAsset] = []
+        for year in stride(from: thisYear - 1, through: oldestYear, by: -1) {
+            // Feb 29 in a non-leap year has no day to match.
+            guard let day = calendar.date(from: DateComponents(year: year, month: parts.month, day: parts.day)),
+                  calendar.component(.month, from: day) == parts.month,
+                  let start = calendar.date(byAdding: .day, value: -toleranceDays, to: calendar.startOfDay(for: day)),
+                  let end = calendar.date(byAdding: .day, value: toleranceDays + 1, to: calendar.startOfDay(for: day))
+            else { continue }
+            let options = imageOptions()
+            options.predicate = NSPredicate(
+                format: "mediaType == %d AND creationDate >= %@ AND creationDate < %@",
+                PHAssetMediaType.image.rawValue, start as NSDate, end as NSDate
+            )
+            assets.append(contentsOf: enumerate(PHAsset.fetchAssets(with: options)))
+        }
+        return assets
+    }
+
+    private static func enumerate(_ result: PHFetchResult<PHAsset>) -> [PHAsset] {
+        var assets: [PHAsset] = []
+        assets.reserveCapacity(result.count)
+        result.enumerateObjects { asset, _, _ in assets.append(asset) }
+        assetCache.store(assets)
+        return assets
+    }
+
+    /// The caption `displayName(for:)` would give, from just the ID.
+    static func displayName(forAssetID assetID: String) -> String {
+        resolveAsset(assetID).map(displayName(for:)) ?? assetID
+    }
+
     /// A short label for the grid caption, since assets don't reliably expose
     /// a filename without a separate, per-asset resource lookup — too costly
     /// to do for every cell in a library that can run into the thousands.

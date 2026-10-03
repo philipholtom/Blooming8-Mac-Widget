@@ -2,6 +2,7 @@ import Blooming8Core
 import AppKit
 import Combine
 import SwiftUI
+import Photos
 import os
 
 /// What the sidebar can select, and the detail pane can show.
@@ -262,13 +263,37 @@ final class LibraryModel: ObservableObject {
     /// and, more noticeably, to hand to SwiftUI as a fresh 30k+-item
     /// `ForEach` — not something worth re-paying on every single visit
     /// within a session just to pick up photos imported a moment ago.
-    private var applePhotosCache: [LibraryItem]?
+    /// What the Apple Photos tab is showing: the whole library, photos taken
+    /// on today's date in earlier years, or one album.
+    enum PhotosChoice: Hashable {
+        case all
+        case onThisDay
+        case album(id: String, title: String)
+
+        var title: String {
+            switch self {
+            case .all: return "All Photos"
+            case .onThisDay: return "On This Day"
+            case .album(_, let title): return title
+            }
+        }
+    }
+
+    @Published private(set) var photosChoice: PhotosChoice = .all
+    @Published private(set) var photosAlbums: [PhotosLibrarySource.PhotoAlbum] = []
+    private var photosCaches: [PhotosChoice: [LibraryItem]] = [:]
+
+    func selectPhotosChoice(_ choice: PhotosChoice) {
+        photosChoice = choice
+        if currentSource == .applePhotos { load(.applePhotos) }
+    }
 
     private func loadApplePhotos() {
-        if let cached = applePhotosCache {
+        let choice = photosChoice
+        if let cached = photosCaches[choice] {
             items = cached
             isLoading = false
-            loadError = cached.isEmpty ? "No photos found in your Photos library." : nil
+            loadError = cached.isEmpty ? emptyMessage(for: choice) : nil
         } else {
             isLoading = true
             items = []
@@ -281,18 +306,48 @@ final class LibraryModel: ObservableObject {
                 return
             }
             guard !Task.isCancelled else { return }
-            let assets = await Task.detached(priority: .userInitiated) {
-                PhotosLibrarySource.fetchAllImageAssets()
-            }.value
+
+            // The album list refreshes every visit (albums come and go).
+            let albums = await Task.detached(priority: .userInitiated) { PhotosLibrarySource.fetchAlbums() }.value
             guard !Task.isCancelled else { return }
-            let fresh = assets.map { asset in
+            photosAlbums = albums
+
+            var notice: String?
+            let assets: [PHAsset] = await Task.detached(priority: .userInitiated) {
+                switch choice {
+                case .all:
+                    return PhotosLibrarySource.fetchAllImageAssets()
+                case .album(let id, _):
+                    return PhotosLibrarySource.fetchImageAssets(inAlbum: id)
+                case .onThisDay:
+                    return PhotosLibrarySource.fetchOnThisDay()
+                }
+            }.value
+            var found = assets
+            if choice == .onThisDay, found.isEmpty {
+                // Nothing on exactly this day — widen to a few days either side.
+                found = await Task.detached(priority: .userInitiated) { PhotosLibrarySource.fetchOnThisDay(toleranceDays: 3) }.value
+                if !found.isEmpty { notice = "Nothing from exactly this day — showing the three days either side." }
+            }
+            guard !Task.isCancelled else { return }
+
+            let fresh = found.map { asset in
                 LibraryItem(photoAssetID: asset.localIdentifier, name: PhotosLibrarySource.displayName(for: asset))
             }
-            applePhotosCache = fresh
+            photosCaches[choice] = fresh
             items = fresh
-            Self.log.notice("load: Apple Photos produced \(fresh.count) images")
+            loadNotice = notice
+            Self.log.notice("load: Apple Photos (\(choice.title, privacy: .public)) produced \(fresh.count) images")
             isLoading = false
-            if items.isEmpty { loadError = "No photos found in your Photos library." }
+            if items.isEmpty { loadError = emptyMessage(for: choice) }
+        }
+    }
+
+    private func emptyMessage(for choice: PhotosChoice) -> String {
+        switch choice {
+        case .all: return "No photos found in your Photos library."
+        case .onThisDay: return "No photos from this day in earlier years."
+        case .album(_, let title): return "No photos in “\(title)”."
         }
     }
 

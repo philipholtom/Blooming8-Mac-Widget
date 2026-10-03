@@ -53,7 +53,44 @@ final class ScheduledContentManager: ObservableObject {
 
     private func fire() async {
         guard let schedule = settings.scheduledContent, schedule.isEnabled else { return }
-        await controller.fireScheduledContent(schedule)
+        await run(schedule)
         reschedule(with: settings.scheduledContent)
+    }
+
+    /// Does what `schedule` says right now — also the "Run Now" button in
+    /// Settings. A photo from Photos "on this day" is handled here because
+    /// only the windowed app has the Photos access; everything else is a
+    /// generated picture and goes through the controller.
+    func run(_ schedule: ScheduledContent) async {
+        if schedule.sourceID == ScheduledContent.onThisDayPhotosSourceID {
+            await sendOnThisDayPhoto()
+        } else {
+            await controller.fireScheduledContent(schedule)
+        }
+    }
+
+    private func sendOnThisDayPhoto() async {
+        guard await PhotosLibrarySource.requestAccess() else {
+            controller.statusText = "Photos access denied. Enable it for Blooming8 in System Settings → Privacy & Security → Photos."
+            controller.logActivity("On this day: Photos access denied", success: false)
+            return
+        }
+        let pool = await Task.detached(priority: .userInitiated) { () -> [String] in
+            let exact = PhotosLibrarySource.fetchOnThisDay()
+            return (exact.isEmpty ? PhotosLibrarySource.fetchOnThisDay(toleranceDays: 3) : exact).map(\.localIdentifier)
+        }.value
+        guard let id = pool.randomElement() else {
+            controller.statusText = "No photos from this day in earlier years."
+            controller.logActivity("On this day: no photos from earlier years", success: true)
+            return
+        }
+        guard let data = await PhotosLibrarySource.fetchOriginalData(assetID: id) else {
+            controller.logActivity("On this day: couldn't read the photo from Photos", success: false)
+            return
+        }
+        controller.preparePhotosLibraryImage(data: data, displayName: PhotosLibrarySource.displayName(forAssetID: id), assetID: id)
+        guard let candidate = controller.localFolderCandidates.first else { return }
+        await controller.confirmLocalFolderCandidate(candidate)
+        controller.cancelLocalFolderCandidate()
     }
 }

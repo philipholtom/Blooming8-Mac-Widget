@@ -19,6 +19,7 @@ struct LibraryGrid: View {
     @State private var pendingMove: [LibraryItem]?
     @State private var cropTarget: LibraryItem?
     @State private var isDropTargeted = false
+    @State private var showPhotosPicker = false
 
     /// The gallery currently being browsed, if any — used both to know
     /// whether a drop here means "upload into this gallery" and to refresh
@@ -42,7 +43,13 @@ struct LibraryGrid: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .searchable(text: $library.searchText, placement: .toolbar, prompt: "Filter by filename")
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if library.currentSource == .applePhotos { photosHeader }
+        }
         .safeAreaInset(edge: .bottom) { countBar }
+        .sheet(isPresented: $showPhotosPicker) {
+            LocalFolderCandidatePickerSheet(controller: controller, source: photosPickerSource)
+        }
         .sheet(item: $videoForFramePicker) { item in
             if let url = item.url {
                 VideoFramePickerSheet(videoURL: url, controller: controller)
@@ -384,6 +391,70 @@ struct LibraryGrid: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    // MARK: - Apple Photos header
+
+    /// The album menu and Random 3 button shown above the Apple Photos grid.
+    private var photosHeader: some View {
+        HStack(spacing: 10) {
+            Menu {
+                photosChoiceButton(.all, symbol: "photo.on.rectangle")
+                photosChoiceButton(.onThisDay, symbol: "calendar")
+                photosAlbumSection(title: nil, kind: .smart)
+                photosAlbumSection(title: "My Albums", kind: .user)
+                photosAlbumSection(title: "Shared Albums", kind: .shared)
+            } label: {
+                Label(library.photosChoice.title, systemImage: library.photosChoice == .onThisDay ? "calendar" : "photo.stack")
+            }
+            .fixedSize()
+
+            Button {
+                showPhotosPicker = true
+            } label: {
+                Label("Random 3", systemImage: "shuffle")
+            }
+            .disabled(controller.isBusy)
+            .help("Pick 3 random photos from \(library.photosChoice.title) to choose from")
+
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private func photosChoiceButton(_ choice: LibraryModel.PhotosChoice, symbol: String) -> some View {
+        Button {
+            library.selectPhotosChoice(choice)
+        } label: {
+            if library.photosChoice == choice {
+                Label(choice.title, systemImage: "checkmark")
+            } else {
+                Text(choice.title)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func photosAlbumSection(title: String?, kind: PhotosLibrarySource.PhotoAlbum.Kind) -> some View {
+        let albums = library.photosAlbums.filter { $0.kind == kind }
+        if !albums.isEmpty {
+            Divider()
+            if let title { Text(title) }
+            ForEach(albums) { album in
+                photosChoiceButton(.album(id: album.id, title: album.title), symbol: "rectangle.stack")
+                    .help("\(album.count) photos")
+            }
+        }
+    }
+
+    private var photosPickerSource: LocalFolderCandidatePickerSheet.Source {
+        switch library.photosChoice {
+        case .all: return .photosAlbum(id: nil, title: "Photos")
+        case .onThisDay: return .photosOnThisDay
+        case .album(let id, let title): return .photosAlbum(id: id, title: title)
+        }
+    }
+
     private var countBar: some View {
         HStack(spacing: 8) {
             Text(countLabel)
@@ -399,8 +470,10 @@ struct LibraryGrid: View {
                 Label(notice, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.orange)
-                Button("Retry") { library.reloadCurrentGallery() }
-                    .controlSize(.small)
+                if case .gallery? = library.currentSource {
+                    Button("Retry") { library.reloadCurrentGallery() }
+                        .controlSize(.small)
+                }
             }
             Spacer()
         }

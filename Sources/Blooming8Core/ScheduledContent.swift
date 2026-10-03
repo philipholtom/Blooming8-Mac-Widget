@@ -5,6 +5,11 @@ import Foundation
 /// NASA picture every morning. Unlike `ScheduledSend`, which re-displays a
 /// photo already on the frame, this makes a fresh one each time it fires.
 public struct ScheduledContent: Codable, Equatable {
+    /// Not a `ContentSource`: a photo from the user's Photos library taken on
+    /// this day in an earlier year. Handled by the windowed app, which owns
+    /// the Photos access.
+    public static let onThisDayPhotosSourceID = "photos.onThisDay"
+
     public var isEnabled: Bool
     /// `ContentSource.id` — see `ContentSources.all`.
     public var sourceID: String

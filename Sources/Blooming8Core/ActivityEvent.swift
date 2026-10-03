@@ -26,7 +26,7 @@ extension PhotoController {
 
     /// Appends an outcome to `recentActivity`, trimming to the cap and, on
     /// failure, raising `hasUnseenActivityFailure` for the toolbar badge.
-    func logActivity(_ message: String, success: Bool) {
+    public func logActivity(_ message: String, success: Bool) {
         recentActivity.insert(ActivityEvent(message: message, success: success), at: 0)
         if recentActivity.count > Self.activityLogLimit {
             recentActivity.removeLast(recentActivity.count - Self.activityLogLimit)

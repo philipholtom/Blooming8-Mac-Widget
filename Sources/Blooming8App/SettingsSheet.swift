@@ -630,6 +630,8 @@ struct SettingsSheet: View {
                 ForEach(ContentSources.all, id: \.id) { source in
                     Text(source.displayName).tag(source.id)
                 }
+                Divider()
+                Text("Apple Photos — on this day").tag(ScheduledContent.onThisDayPhotosSourceID)
             }
 
             if ContentSources.all.first(where: { $0.id == schedule.sourceID }) is TodayContentSource {
@@ -661,7 +663,7 @@ struct SettingsSheet: View {
 
             HStack {
                 Button("Run Now") {
-                    Task { await controller.fireScheduledContent(schedule) }
+                    Task { await scheduledContentManager.run(schedule) }
                 }
                 .disabled(controller.isBusy || settings.deviceIP.isEmpty)
                 Text("Needs this app open at the time. If the Mac is asleep, it runs when it wakes.")

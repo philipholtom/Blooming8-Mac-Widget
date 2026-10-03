@@ -1493,6 +1493,40 @@ public final class PhotoController: ObservableObject {
         statusText = ""
     }
 
+    /// Several Photos-library images at once (the Random-from-an-album and
+    /// "on this day" pickers): renders each for the frame off the main thread
+    /// and publishes them as `localFolderCandidates`, like the folder pickers do.
+    public func preparePhotosCandidates(_ items: [(data: Data, displayName: String, assetID: String)]) async {
+        let width = settings.renderWidth
+        let height = settings.renderHeight
+        let crop = settings.cropLandscapePhotos
+        let rendered: [(image: NSImage, jpeg: Data, displayName: String, assetID: String)] = await Task.detached(priority: .userInitiated) { [weak self] in
+            items.compactMap { item in
+                guard let cgImage = loadUprightCGImage(data: item.data),
+                      let framed = self?.renderForFrame(cgImage: cgImage, width: width, height: height, cropLandscapePhotos: crop),
+                      let jpeg = ImageCanvas.jpegData(framed)
+                else { return nil }
+                return (framed, jpeg, item.displayName, item.assetID)
+            }
+        }.value
+
+        var candidates: [LocalFolderCandidate] = []
+        for item in rendered {
+            var candidate = LocalFolderCandidate(
+                fileURL: URL(fileURLWithPath: sanitizeFilenameComponent(item.displayName)),
+                image: item.image, jpegData: item.jpeg, gallery: "Apple", isLocalFile: false
+            )
+            candidate.sourceKey = Self.sourceKey(forPhotosAsset: item.assetID, cropLandscapePhotos: crop, width: width, height: height)
+            candidates.append(candidate)
+        }
+        guard !candidates.isEmpty else {
+            statusText = "Couldn't process those photos."
+            return
+        }
+        localFolderCandidates = candidates
+        statusText = ""
+    }
+
     /// Whether `candidate` was rendered from a still image file on disk that
     /// can be re-rendered with a chosen crop. False for generated images,
     /// Photos-library items and video frames, which have no such file.
