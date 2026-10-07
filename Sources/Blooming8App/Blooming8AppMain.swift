@@ -12,6 +12,7 @@ final class AppEnvironment: ObservableObject {
     let controller: PhotoController
     let scheduledSendManager: ScheduledSendManager
     let scheduledContentManager: ScheduledContentManager
+    let photosMirrorManager: PhotosMirrorManager
 
     init() {
         let settings = AppSettings()
@@ -19,6 +20,7 @@ final class AppEnvironment: ObservableObject {
         self.controller = PhotoController(settings: settings)
         self.scheduledSendManager = ScheduledSendManager(controller: controller, settings: settings)
         self.scheduledContentManager = ScheduledContentManager(controller: controller, settings: settings)
+        self.photosMirrorManager = PhotosMirrorManager(controller: controller, settings: settings)
         MuseumCardServer.shared.start(settings: settings)
     }
 }
@@ -87,7 +89,7 @@ struct Blooming8AppMain: App {
 
     var body: some Scene {
         WindowGroup(id: "main") {
-            RootView(settings: env.settings, controller: env.controller, scheduledSendManager: env.scheduledSendManager, scheduledContentManager: env.scheduledContentManager)
+            RootView(settings: env.settings, controller: env.controller, scheduledSendManager: env.scheduledSendManager, scheduledContentManager: env.scheduledContentManager, photosMirrorManager: env.photosMirrorManager)
                 .frame(minWidth: 900, minHeight: 560)
                 .onAppear {
                     Self.log.notice("app: window appeared")

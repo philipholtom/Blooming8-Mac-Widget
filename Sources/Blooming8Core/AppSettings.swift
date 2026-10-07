@@ -253,6 +253,12 @@ public final class AppSettings: ObservableObject {
         set { mutateActiveProfile { $0.scheduledSend = newValue } }
     }
 
+    /// A frame gallery kept in step with a Photos album — see `PhotosMirror`.
+    public var photosMirror: PhotosMirror? {
+        get { activeProfile.photosMirror }
+        set { mutateActiveProfile { $0.photosMirror = newValue } }
+    }
+
     /// A generated picture shown on a schedule — see `ScheduledContent`.
     public var scheduledContent: ScheduledContent? {
         get { activeProfile.scheduledContent }

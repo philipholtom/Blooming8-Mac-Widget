@@ -1,5 +1,6 @@
 import Blooming8Core
 import AppKit
+import Photos
 import SwiftUI
 
 struct SettingsSheet: View {
@@ -7,6 +8,7 @@ struct SettingsSheet: View {
     @ObservedObject var controller: PhotoController
     @ObservedObject var scheduledSendManager: ScheduledSendManager
     @ObservedObject var scheduledContentManager: ScheduledContentManager
+    @ObservedObject var photosMirrorManager: PhotosMirrorManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var ipDraft = ""
@@ -44,6 +46,9 @@ struct SettingsSheet: View {
     @State private var showScheduledSendPhotoPicker = false
     @State private var thumbnailCacheSizeBytes = 0
     @State private var newFrameProfileName = ""
+    @State private var mirrorAlbums: [PhotosLibrarySource.PhotoAlbum] = []
+    @State private var photosAuthorized = false
+    @State private var mirrorGalleryDraft = ""
     @State private var pendingFrameProfileDeletion: FrameProfile?
     @ObservedObject private var privacy = PrivacyBlur.shared
     @AppStorage("settingsSheetCategory") private var category: SettingsCategory = .frames
@@ -153,6 +158,9 @@ struct SettingsSheet: View {
                 }
                 Section("Scheduled Content · \(activeProfileName)") {
                     scheduledContentSection
+                }
+                Section("Photos Album Mirror · \(activeProfileName)") {
+                    photosMirrorSection
                 }
                     case .galleries:
                 privacySections
@@ -279,6 +287,9 @@ struct SettingsSheet: View {
         // straight to settings, and typed fields are committed when you
         // switch category, press Done, or close the window.
         .onChange(of: category) { _ in commitDrafts() }
+        .task(id: category) {
+            if category == .automation { await loadMirrorAlbums() }
+        }
         .onChange(of: controller.maxIdleSeconds) { _ in
             // The frame answered after the sheet opened (e.g. it just woke):
             // fill the Device fields unless the user is mid-edit.
@@ -286,6 +297,7 @@ struct SettingsSheet: View {
         }
         .onDisappear { commitDrafts() }
         .onAppear {
+            mirrorGalleryDraft = settings.photosMirror?.gallery ?? ""
             migrateLegacyLocks()
             syncFrameDraftsFromActiveProfile()
             nasaKeyDraft = settings.nasaApiKey
@@ -729,6 +741,122 @@ struct SettingsSheet: View {
         )
     }
 
+    // MARK: - Photos album mirror
+
+    @ViewBuilder
+    private var photosMirrorSection: some View {
+        if !photosAuthorized {
+            Text("Keeps a gallery on the frame in step with one album in your Photos library. It needs access to Photos.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Allow Photos Access…") {
+                Task {
+                    photosAuthorized = await PhotosLibrarySource.requestAccess()
+                    if photosAuthorized { await loadMirrorAlbums() }
+                }
+            }
+        } else {
+            Picker("Album", selection: mirrorAlbumBinding) {
+                Text("Choose an album…").tag("")
+                ForEach(mirrorAlbums) { album in
+                    Text("\(album.title) (\(album.count))").tag(album.id)
+                }
+            }
+
+            if let mirror = settings.photosMirror, !mirror.albumID.isEmpty {
+                TextField("Gallery on the frame", text: $mirrorGalleryDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { commitDrafts() }
+
+                Picker("Which photos", selection: Binding(
+                    get: { settings.photosMirror?.mode ?? .newest },
+                    set: { settings.photosMirror?.mode = $0 }
+                )) {
+                    ForEach(PhotosMirror.Mode.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+
+                Picker("How many", selection: Binding(
+                    get: { settings.photosMirror?.maxPhotos ?? 100 },
+                    set: { settings.photosMirror?.maxPhotos = $0 }
+                )) {
+                    ForEach(PhotosMirror.photoCountChoices, id: \.self) { Text("\($0) photos").tag($0) }
+                }
+
+                if mirror.mode == .random {
+                    Picker("Pick a fresh set", selection: Binding(
+                        get: { settings.photosMirror?.reshuffle ?? .never },
+                        set: { settings.photosMirror?.reshuffle = $0 }
+                    )) {
+                        ForEach(PhotosMirror.Reshuffle.allCases) { Text($0.label).tag($0) }
+                    }
+                }
+
+                Toggle(mirror.mode == .random ? "Also remove photos that drop out of the chosen set" : "Also remove photos that leave the album", isOn: Binding(
+                    get: { settings.photosMirror?.removeDeleted ?? false },
+                    set: { settings.photosMirror?.removeDeleted = $0 }
+                ))
+                Toggle("Sync automatically", isOn: Binding(
+                    get: { settings.photosMirror?.isEnabled ?? false },
+                    set: { settings.photosMirror?.isEnabled = $0 }
+                ))
+
+                HStack {
+                    Button("Sync Now") {
+                        commitDrafts()
+                        Task { await photosMirrorManager.syncNow() }
+                    }
+                    .disabled(photosMirrorManager.isSyncing || controller.isBusy || settings.deviceIP.isEmpty)
+                    if mirror.mode == .random {
+                        Button("Shuffle Now") {
+                            commitDrafts()
+                            Task { await photosMirrorManager.syncNow(reshuffle: true) }
+                        }
+                        .disabled(photosMirrorManager.isSyncing || controller.isBusy || settings.deviceIP.isEmpty)
+                        .help("Pick a fresh random set from the album and sync it to the frame")
+                    }
+                    if photosMirrorManager.isSyncing {
+                        ProgressView().controlSize(.small)
+                        Text(photosMirrorManager.progressText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let summary = photosMirrorManager.lastSummary, !photosMirrorManager.isSyncing {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Random keeps the same set of photos until you shuffle it or the schedule above comes round, so the frame isn't changed on every check. Automatic syncing checks shortly after launch and then every half hour while the app is open. It does nothing if nothing has changed, and never wakes a sleeping frame. Only photos the mirror itself uploaded are ever removed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var mirrorAlbumBinding: Binding<String> {
+        Binding(
+            get: { settings.photosMirror?.albumID ?? "" },
+            set: { id in
+                guard let album = mirrorAlbums.first(where: { $0.id == id }) else { return }
+                if settings.photosMirror == nil { settings.photosMirror = PhotosMirror() }
+                settings.photosMirror?.albumID = album.id
+                settings.photosMirror?.albumTitle = album.title
+                if (settings.photosMirror?.gallery ?? "").isEmpty {
+                    settings.photosMirror?.gallery = album.title
+                    mirrorGalleryDraft = album.title
+                }
+            }
+        )
+    }
+
+    private func loadMirrorAlbums() async {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        photosAuthorized = status == .authorized || status == .limited
+        guard photosAuthorized else { return }
+        mirrorAlbums = await Task.detached(priority: .userInitiated) { PhotosLibrarySource.fetchAlbums() }.value
+    }
+
     // MARK: - Privacy (one lock password, plus which galleries it hides)
 
     /// The single tab that holds every locked gallery. Locked galleries are
@@ -1059,6 +1187,10 @@ struct SettingsSheet: View {
     }
 
     private func commitDrafts() {
+        let galleryDraft = mirrorGalleryDraft.trimmingCharacters(in: .whitespaces)
+        if let mirror = settings.photosMirror, !galleryDraft.isEmpty, galleryDraft != mirror.gallery {
+            settings.photosMirror?.gallery = galleryDraft
+        }
         let ip = ipDraft.trimmingCharacters(in: .whitespaces)
         if !ip.isEmpty { settings.deviceIP = ip }
         settings.bleDeviceName = bleNameDraft.trimmingCharacters(in: .whitespaces)

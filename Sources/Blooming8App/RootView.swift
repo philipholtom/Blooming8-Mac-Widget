@@ -10,6 +10,7 @@ struct RootView: View {
     @ObservedObject var controller: PhotoController
     @ObservedObject var scheduledSendManager: ScheduledSendManager
     @ObservedObject var scheduledContentManager: ScheduledContentManager
+    @ObservedObject var photosMirrorManager: PhotosMirrorManager
     @StateObject private var library: LibraryModel
     @ObservedObject private var incoming = IncomingFiles.shared
     @ObservedObject private var privacy = PrivacyBlur.shared
@@ -21,12 +22,14 @@ struct RootView: View {
     @State private var showSendRemotely = false
     @State private var thumbnailSize: Double = 150
     @State private var showDeleteGalleryConfirm = false
+    @State private var backupRequest: BackupRequest?
 
-    init(settings: AppSettings, controller: PhotoController, scheduledSendManager: ScheduledSendManager, scheduledContentManager: ScheduledContentManager) {
+    init(settings: AppSettings, controller: PhotoController, scheduledSendManager: ScheduledSendManager, scheduledContentManager: ScheduledContentManager, photosMirrorManager: PhotosMirrorManager) {
         self.settings = settings
         self.controller = controller
         self.scheduledSendManager = scheduledSendManager
         self.scheduledContentManager = scheduledContentManager
+        self.photosMirrorManager = photosMirrorManager
         _library = StateObject(wrappedValue: LibraryModel(settings: settings, controller: controller))
     }
 
@@ -41,7 +44,9 @@ struct RootView: View {
         // more complex than the long-stable HSplitView already used for the
         // grid/inspector split below) with HSplitView here resolved it.
         HSplitView {
-            Sidebar(settings: settings, controller: controller, source: $source, onUpload: uploadPhotos(to:))
+            Sidebar(settings: settings, controller: controller, source: $source, onUpload: uploadPhotos(to:), onBackup: { name in
+                backupRequest = BackupRequest(preselected: name.map { [$0] })
+            })
                 .frame(minWidth: 200, idealWidth: 230, maxWidth: 320)
 
             detail
@@ -84,13 +89,16 @@ struct RootView: View {
             if activeSource == .favorites { library.load(.favorites) }
         }
         .sheet(isPresented: $showSettings) {
-            SettingsSheet(settings: settings, controller: controller, scheduledSendManager: scheduledSendManager, scheduledContentManager: scheduledContentManager)
+            SettingsSheet(settings: settings, controller: controller, scheduledSendManager: scheduledSendManager, scheduledContentManager: scheduledContentManager, photosMirrorManager: photosMirrorManager)
         }
         .sheet(isPresented: $showLogs) {
             DeviceLogsView(settings: settings)
         }
         .sheet(isPresented: $showActivity) {
             ActivitySheet(controller: controller)
+        }
+        .sheet(item: $backupRequest) { request in
+            BackupSheet(request: request, controller: controller, settings: settings)
         }
         .sheet(isPresented: Binding(get: { !incoming.urls.isEmpty }, set: { if !$0 { incoming.urls = [] } })) {
             IncomingFilesSheet(urls: incoming.urls, controller: controller, settings: settings)
@@ -140,6 +148,7 @@ struct RootView: View {
                 settings: settings,
                 scheduledSendManager: scheduledSendManager,
                 scheduledContentManager: scheduledContentManager,
+                photosMirrorManager: photosMirrorManager,
                 openAutomationSettings: {
                     // SettingsSheet remembers its last page under this key.
                     UserDefaults.standard.set("Automation", forKey: "settingsSheetCategory")
@@ -254,6 +263,7 @@ struct RootView: View {
             if let galleryName = activeGalleryName {
                 Menu {
                     Button("Upload Photos…") { uploadPhotos(to: galleryName) }
+                    Button("Back Up…") { backupRequest = BackupRequest(preselected: [galleryName]) }
                     Button("Download Gallery…") {
                         guard let folder = FilePicker.chooseFolder() else { return }
                         Task { await controller.downloadGallery(galleryName, to: folder) }

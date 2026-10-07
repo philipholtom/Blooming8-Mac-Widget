@@ -1,5 +1,6 @@
 import Blooming8Core
 import AppKit
+import Charts
 import SwiftUI
 
 /// What the frame is showing right now, with the whole-frame actions that
@@ -11,6 +12,7 @@ struct CurrentPhotoPane: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var scheduledSendManager: ScheduledSendManager
     @ObservedObject var scheduledContentManager: ScheduledContentManager
+    @ObservedObject var photosMirrorManager: PhotosMirrorManager
     /// Opens Settings on the Automation page.
     let openAutomationSettings: () -> Void
     /// Opens the full Activity list.
@@ -22,6 +24,22 @@ struct CurrentPhotoPane: View {
     @State private var showFavoritesPicker = false
     @State private var showRandomPhotoPicker = false
     @State private var showOnThisDayPicker = false
+    @State private var batteryRange: BatteryRange = .week
+
+    private enum BatteryRange: String, CaseIterable, Identifiable {
+        case day = "24 hours"
+        case week = "7 days"
+        case month = "30 days"
+
+        var id: String { rawValue }
+        var seconds: TimeInterval {
+            switch self {
+            case .day: return 86_400
+            case .week: return 7 * 86_400
+            case .month: return 30 * 86_400
+            }
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -156,6 +174,7 @@ struct CurrentPhotoPane: View {
             showSomethingNewCard
             comingUpCard
             recentActivityCard
+            batteryCard
             randomSourcesCard
             slideshowCard
         }
@@ -274,6 +293,12 @@ struct CurrentPhotoPane: View {
             let name = send.devicePath.isEmpty ? "Scheduled photo" : (send.devicePath as NSString).lastPathComponent
             rows.append(ScheduleRow(id: "send", symbol: "clock", title: name, when: Self.describe(next)))
         }
+        if let mirror = settings.photosMirror, mirror.isEnabled, !mirror.albumID.isEmpty {
+            let when = photosMirrorManager.isSyncing
+                ? "Syncing…"
+                : (photosMirrorManager.lastSyncDate.map { "Checked \($0.formatted(date: .omitted, time: .shortened))" } ?? "Checks every 30 min")
+            rows.append(ScheduleRow(id: "mirror", symbol: "arrow.triangle.2.circlepath.circle", title: "Mirror “\(mirror.albumTitle)”", when: when))
+        }
         if settings.autoRandomEnabled, let next = controller.nextAutoRandomFireDate {
             rows.append(ScheduleRow(id: "auto", symbol: "arrow.triangle.2.circlepath", title: "Auto random photo", when: Self.describe(next)))
         }
@@ -315,6 +340,64 @@ struct CurrentPhotoPane: View {
                 Button("View all activity…", action: openActivity)
                     .buttonStyle(.link)
                     .font(.caption)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
+        }
+    }
+
+    private var batteryCard: some View {
+        GroupBox("Battery") {
+            VStack(alignment: .leading, spacing: 10) {
+                let now = Date()
+                let visible = controller.batterySamples.filter { now.timeIntervalSince($0.date) <= batteryRange.seconds }
+                HStack(alignment: .firstTextBaseline) {
+                    if let percent = controller.batteryPercent {
+                        Text("\(percent)%")
+                            .font(.title2.weight(.semibold))
+                    }
+                    if let days = BatteryHistory.daysRemaining(samples: controller.batterySamples, now: now) {
+                        Text(days > 99 ? "more than 99 days left at the recent rate" : "about \(Int(days.rounded())) day\(Int(days.rounded()) == 1 ? "" : "s") left at the recent rate")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Picker("Range", selection: $batteryRange) {
+                        ForEach(BatteryRange.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 190)
+                }
+
+                if visible.count >= 2 {
+                    Chart(visible) { sample in
+                        AreaMark(x: .value("Time", sample.date), y: .value("Battery", sample.percent))
+                            .interpolationMethod(.monotone)
+                            .foregroundStyle(Color.accentColor.opacity(0.15))
+                        LineMark(x: .value("Time", sample.date), y: .value("Battery", sample.percent))
+                            .interpolationMethod(.monotone)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .chartYScale(domain: 0...100)
+                    .chartYAxis {
+                        AxisMarks(values: [0, 50, 100]) { value in
+                            AxisGridLine()
+                            AxisValueLabel { if let v = value.as(Int.self) { Text("\(v)%") } }
+                        }
+                    }
+                    .chartXScale(domain: now.addingTimeInterval(-batteryRange.seconds)...now)
+                    .frame(height: 110)
+                } else {
+                    Text(controller.batterySamples.isEmpty
+                        ? "Readings appear here once the frame has been awake with the app open."
+                        : "Not enough readings in this range yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Readings only come in while the frame is awake, so there are gaps while it sleeps.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(8)

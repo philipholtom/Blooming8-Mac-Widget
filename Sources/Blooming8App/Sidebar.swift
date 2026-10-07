@@ -10,6 +10,8 @@ struct Sidebar: View {
     @Binding var source: LibrarySource?
     /// Picks image files and uploads them into the named gallery.
     let onUpload: (String) -> Void
+    /// Opens the backup sheet — with that gallery ticked, or all of them for nil.
+    let onBackup: (String?) -> Void
 
     @State private var showNewGallerySheet = false
     @State private var newGalleryName = ""
@@ -47,6 +49,7 @@ struct Sidebar: View {
                         row(.gallery(name), isLocked: lockedTab(for: name) != nil)
                             .contextMenu {
                                 Button("Upload Photos…") { onUpload(name) }
+                                Button("Back Up Gallery…") { onBackup(name) }
                                 Button("Download Gallery…") {
                                     guard let folder = FilePicker.chooseFolder() else { return }
                                     Task { await controller.downloadGallery(name, to: folder) }
@@ -98,6 +101,16 @@ struct Sidebar: View {
         HStack {
             sectionHeader("Galleries")
             Spacer()
+            Button {
+                onBackup(nil)
+            } label: {
+                Image(systemName: "externaldrive.badge.plus")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tertiary)
+            .help("Back up galleries to a folder on this Mac")
+
             Button {
                 newGalleryName = ""
                 showNewGallerySheet = true

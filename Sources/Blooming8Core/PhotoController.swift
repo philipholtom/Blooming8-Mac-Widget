@@ -5,7 +5,7 @@ import CryptoKit
 @MainActor
 public final class PhotoController: ObservableObject {
     public let settings: AppSettings
-    private let client = BloominClient()
+    let client = BloominClient()
     private let bleWaker = BLEWaker()
 
     @Published public var previewImage: NSImage?
@@ -55,6 +55,9 @@ public final class PhotoController: ObservableObject {
     /// send/keep-awake outcomes, for the toolbar Activity sheet — see
     /// ActivityEvent.swift.
     @Published public var recentActivity: [ActivityEvent] = []
+    /// The active frame's battery readings over time — see `BatteryHistory`.
+    @Published public private(set) var batterySamples: [BatterySample] = []
+    private var batteryProfileCancellable: AnyCancellable?
     /// True once a failure has landed in `recentActivity` that the Activity
     /// sheet hasn't been opened to see yet; cleared when it's opened.
     @Published public var hasUnseenActivityFailure: Bool = false
@@ -141,6 +144,14 @@ public final class PhotoController: ObservableObject {
                 Task { @MainActor [weak self] in
                     self?.updateAutoRandomSchedule()
                 }
+            }
+
+        // Each frame has its own battery record, so switching profiles loads
+        // that frame's. (Fires once straight away with the current profile.)
+        batteryProfileCancellable = settings.$activeFrameProfileID
+            .removeDuplicates()
+            .sink { [weak self] id in
+                self?.batterySamples = BatteryHistory.load(profileID: id)
             }
 
         statusPollCancellable = Publishers.CombineLatest(settings.$frameProfiles, settings.$activeFrameProfileID)
@@ -565,7 +576,7 @@ public final class PhotoController: ObservableObject {
     /// Runs `operation`; if it fails with a connectivity error (the frame is
     /// likely asleep) and a Bluetooth device name is configured, sends a wake
     /// pulse, polls until the frame answers HTTP again, then retries once.
-    private func withWakeRetry<T>(_ operation: () async throws -> T) async throws -> T {
+    func withWakeRetry<T>(_ operation: () async throws -> T) async throws -> T {
         do {
             return try await operation()
         } catch {
@@ -589,6 +600,22 @@ public final class PhotoController: ObservableObject {
         return false
     }
 
+    /// The app and the menu bar widget both poll the frame and both record
+    /// readings into the same file, so each re-reads it first: that avoids
+    /// writing a reading the other one just stored, and avoids overwriting
+    /// the other's newer readings with a stale list.
+    private func recordBattery(_ percent: Int?) {
+        guard let percent else { return }
+        let profileID = settings.activeFrameProfileID
+        let stored = BatteryHistory.load(profileID: profileID)
+        guard let updated = BatteryHistory.recording(percent, at: Date(), into: stored) else {
+            if stored != batterySamples { batterySamples = stored }
+            return
+        }
+        batterySamples = updated
+        BatteryHistory.save(updated, profileID: profileID)
+    }
+
     private func applyDeviceInfo(_ info: DeviceInfo) {
         deviceName = info.name
         currentGalleryOnDevice = info.gallery
@@ -605,6 +632,7 @@ public final class PhotoController: ObservableObject {
             setCurrentImagePath(path)
         }
         batteryPercent = info.battery
+        recordBattery(info.battery)
         sleepDurationSeconds = info.sleepDuration
         maxIdleSeconds = info.maxIdle
         wakeSensitivity = info.idxWakeSens
@@ -1120,7 +1148,7 @@ public final class PhotoController: ObservableObject {
     /// rendered onto (`settings.renderWidth`/`renderHeight`) — the two have
     /// to agree, or the frame rotates pixels that were never composed for
     /// rotation.
-    private func orientedFilename(_ base: String) -> String {
+    func orientedFilename(_ base: String) -> String {
         let suffix = settings.frameOrientation == .landscape ? "L" : "P"
         return "\(base)_\(suffix).jpg"
     }
@@ -1152,7 +1180,7 @@ public final class PhotoController: ObservableObject {
     /// inside `Task.detached` off the main actor, so this can't be
     /// `@MainActor`-isolated the way an ordinary instance method would be by
     /// default.
-    nonisolated private func renderForFrame(cgImage: CGImage, width: Int, height: Int, cropLandscapePhotos: Bool) -> NSImage? {
+    nonisolated func renderForFrame(cgImage: CGImage, width: Int, height: Int, cropLandscapePhotos: Bool) -> NSImage? {
         let isLandscape = cgImage.width > cgImage.height
         if cropLandscapePhotos, isLandscape {
             return renderFilled(cgImage: cgImage, width: width, height: height)
@@ -1207,7 +1235,7 @@ public final class PhotoController: ObservableObject {
         return shortHash(text)
     }
 
-    nonisolated private static func sourceKey(forPhotosAsset id: String, cropLandscapePhotos: Bool, width: Int, height: Int) -> String {
+    nonisolated static func sourceKey(forPhotosAsset id: String, cropLandscapePhotos: Bool, width: Int, height: Int) -> String {
         shortHash("photos|\(id)|\(cropLandscapePhotos)|\(width)x\(height)")
     }
 
