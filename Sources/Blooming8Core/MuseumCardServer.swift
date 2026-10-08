@@ -5,7 +5,10 @@ import Network
 /// network, advertised over Bonjour as `_b8cards._tcp` so the CrowPanel can
 /// find the Mac without a configured address:
 ///
-/// - `GET /version` → `{"version": N}` — cheap check for whether anything changed
+/// - `GET /version` → `{"version": N, "image": ..., "gallery": ..., "battery": ...}`
+///   — cheap check for whether anything changed, plus what this Mac last saw
+///   on the frame (from its own status polls and sends), so the CrowPanel
+///   knows what's showing even while the frame's Wi-Fi is asleep
 /// - `GET /cards`   → the whole set, `{"version": N, "cards": {path: card},
 ///   "hiddenGalleries": [...]}` — hidden galleries are every gallery in a
 ///   password-locked tab, in any frame profile, so the CrowPanel's gallery
@@ -22,6 +25,7 @@ public final class MuseumCardServer {
 
     private var listener: NWListener?
     private weak var settings: AppSettings?
+    private weak var controller: PhotoController?
     /// Every gallery in a password-locked tab, across all frame profiles.
     private var hiddenGalleries: [String] {
         let tabs = settings?.frameProfiles.flatMap(\.tabs) ?? []
@@ -30,8 +34,9 @@ public final class MuseumCardServer {
 
     private init() {}
 
-    public func start(settings: AppSettings) {
+    public func start(settings: AppSettings, controller: PhotoController) {
         self.settings = settings
+        self.controller = controller
         guard listener == nil else { return }
         do {
             let params = NWParameters.tcp
@@ -84,6 +89,14 @@ public final class MuseumCardServer {
         return MuseumCardStore.shared.snapshot.version &+ Int(hiddenKey % 1_000_000)
     }
 
+    private func versionJSON() -> Data {
+        var object: [String: Any] = ["version": servedVersion]
+        if let path = controller?.currentImagePath { object["image"] = path }
+        if let gallery = controller?.currentGalleryOnDevice { object["gallery"] = gallery }
+        if let battery = controller?.batteryPercent { object["battery"] = battery }
+        return (try? JSONSerialization.data(withJSONObject: object)) ?? Data("{}".utf8)
+    }
+
     private func respond(to header: String, on connection: NWConnection) {
         let requestLine = header.split(separator: "\r\n", maxSplits: 1).first ?? ""
         let parts = requestLine.split(separator: " ")
@@ -96,7 +109,7 @@ public final class MuseumCardServer {
         case ("GET", "/version"):
             store.reload()
             status = "200 OK"
-            body = Data("{\"version\":\(servedVersion)}".utf8)
+            body = versionJSON()
         case ("GET", "/cards"):
             status = "200 OK"
             body = store.exportJSON(hiddenGalleries: hiddenGalleries)
