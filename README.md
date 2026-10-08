@@ -89,9 +89,11 @@ A small companion e-paper screen (an [Elecrow CrowPanel 2.13"](https://www.elecr
 - **Where cards come from** — when a photo is sent, the app reads its EXIF/IPTC (title or caption, date taken, GPS, camera and lens) and reverse-geocodes the location with Apple's geocoder: "Landmark, City, Country" when there's a known point of interest, otherwise "City, Country". Anything you type in the card editor wins from then on.
 - **Where they live** — `~/Library/Application Support/Blooming8/museum_cards.json`, keyed by the photo's path on the frame (e.g. `/gallerys/Apple/IMG_1234-ab12cd34_P.jpg`), since that path is the one identifier the frame, the Mac and the display all share.
 - **How the display gets them** — whichever of the two apps is running serves them on port 8738 (also advertised over Bonjour as `_b8cards._tcp`):
-  - `GET /version` — a number that changes whenever the cards (or the locked galleries) change
+  - `GET /version` — a number that changes whenever the cards (or the locked galleries) change, plus the image, gallery and battery level this Mac last saw on the frame
   - `GET /cards` — every card, plus `hiddenGalleries`: the galleries in password-locked tabs, which the display never offers
-- **Pull, not push** — the display runs on battery and spends almost all its time in deep sleep, so it can't be pushed to. It wakes every 15 minutes or on a button press, asks the frame what's showing, re-downloads the cards only if the version changed, and keeps its own copy so it can still label photos while the Mac is off.
+- **Pull, not push** — the display asks the Mac every 30 seconds, re-downloads the cards only when the version changes, and keeps its own copy so it can still label photos while the Mac is off.
+- **Knowing what's on the frame** — the frame's Wi-Fi sleeps most of the time, but the Mac checks it every minute and knows straight away when it sends a photo, so `/version` tells the display what's showing. The display also asks the frame directly every few minutes, for when the Mac is off.
+- **Power** — the display normally runs on mains power and stays awake (and takes firmware updates over Wi-Fi). Its firmware also has a battery mode that deep-sleeps, waking every 15 minutes or on a button press.
 - **Networking** — the display has to be able to reach the Mac. If the frame lives on a separate network that can't route back to the Mac's, join the Mac's Wi-Fi to the frame's network too and give it a fixed address there.
 
 The display's firmware isn't part of this repo.
